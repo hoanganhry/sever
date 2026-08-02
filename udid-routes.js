@@ -82,7 +82,6 @@ module.exports = function udidRoutes(publicBaseUrl) {
 </plist>`;
 
     res.set('Content-Type', 'application/x-apple-aspen-config');
-    res.set('Content-Disposition', 'attachment; filename="register.mobileconfig"');
     res.send(plist);
   });
 
@@ -91,6 +90,7 @@ module.exports = function udidRoutes(publicBaseUrl) {
     const session = req.query.session || 'unknown';
     let plistXml = null;
 
+    // Bước 2a: đọc dữ liệu thiết bị gửi về (không được để lỗi này làm mất phản hồi)
     try {
       const buf = req.body;
       const asText = buf.toString('utf8');
@@ -115,22 +115,29 @@ module.exports = function udidRoutes(publicBaseUrl) {
       plistXml = null;
     }
 
-    const record = {
-      session,
-      udid: plistXml ? extractPlistString(plistXml, 'UDID') : null,
-      product: plistXml ? extractPlistString(plistXml, 'PRODUCT') : null,
-      version: plistXml ? extractPlistString(plistXml, 'VERSION') : null,
-      capturedAt: new Date().toISOString(),
-      ip: req.ip
-    };
-    saveRecord(record);
+    // Bước 2b: lưu log (không được để lỗi ghi file làm mất phản hồi cho thiết bị)
+    try {
+      const record = {
+        session,
+        udid: plistXml ? extractPlistString(plistXml, 'UDID') : null,
+        product: plistXml ? extractPlistString(plistXml, 'PRODUCT') : null,
+        version: plistXml ? extractPlistString(plistXml, 'VERSION') : null,
+        capturedAt: new Date().toISOString(),
+        ip: req.ip
+      };
+      saveRecord(record);
+    } catch (err) {
+      console.error('UDID callback save error:', err.message);
+    }
 
+    // Bước 2c: LUÔN trả lời thiết bị bằng 1 profile hợp lệ, dù bước trên có lỗi hay không.
     // QUAN TRỌNG: PayloadContent không được để rỗng, nếu không iOS báo
     // "Cài đặt hồ sơ thất bại - Hồ sơ trống". Dùng 1 payload Restrictions
     // không đặt khóa giới hạn nào -> hợp lệ nhưng không thay đổi gì trên máy.
-    const finalUUID = uuidv4().toUpperCase();
-    const payloadUUID = uuidv4().toUpperCase();
-    const finalPlist = `<?xml version="1.0" encoding="UTF-8"?>
+    try {
+      const finalUUID = uuidv4().toUpperCase();
+      const payloadUUID = uuidv4().toUpperCase();
+      const finalPlist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -163,8 +170,13 @@ module.exports = function udidRoutes(publicBaseUrl) {
   <false/>
 </dict>
 </plist>`;
-    res.set('Content-Type', 'application/x-apple-aspen-config');
-    res.send(finalPlist);
+      res.set('Content-Type', 'application/x-apple-aspen-config');
+      res.status(200).send(finalPlist);
+    } catch (err) {
+      // trường hợp xấu nhất tuyệt đối không được xảy ra, nhưng nếu có, vẫn phải trả 200
+      console.error('UDID callback final response error:', err.message);
+      res.status(200).set('Content-Type', 'application/x-apple-aspen-config').send('<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>PayloadContent</key><array><dict><key>PayloadType</key><string>com.apple.applicationaccess</string><key>PayloadVersion</key><integer>1</integer><key>PayloadIdentifier</key><string>com.authapi.restrictions.fallback</string><key>PayloadUUID</key><string>' + uuidv4().toUpperCase() + '</string><key>PayloadDisplayName</key><string>Hoan tat</string></dict></array><key>PayloadDisplayName</key><string>Hoan tat</string><key>PayloadIdentifier</key><string>com.authapi.complete.fallback</string><key>PayloadType</key><string>Configuration</string><key>PayloadUUID</key><string>' + uuidv4().toUpperCase() + '</string><key>PayloadVersion</key><integer>1</integer></dict></plist>');
+    }
   });
 
   // Bước 3: frontend poll để lấy kết quả
