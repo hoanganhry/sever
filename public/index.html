@@ -682,5 +682,266 @@ async function loadAdminLogs() {
 loadOverview();
 setInterval(loadOverview, 30000);
 </script>
+
+<!-- ════════════════════════════════════════════════════
+     DEVICE UID SECTION
+     ════════════════════════════════════════════════════ -->
+<div class="card" id="deviceUidSection" style="margin-top:24px">
+  <div class="card-header" style="display:flex;align-items:center;gap:10px">
+    <span style="font-size:22px">📱</span>
+    <div>
+      <h3 style="margin:0;font-size:16px">Device UID</h3>
+      <p style="margin:0;font-size:12px;opacity:.7">Lấy &amp; quản lý định danh thiết bị</p>
+    </div>
+  </div>
+  <div class="card-body" style="display:flex;flex-direction:column;gap:14px">
+
+    <!-- ── Lấy UID của tôi ── -->
+    <div class="device-block">
+      <div class="device-block-title">🔍 UID của thiết bị này</div>
+      <button class="btn btn-primary" onclick="getMyDeviceUID()" id="btnGetUID">
+        Lấy UID ngay
+      </button>
+      <div id="myUIDResult" style="display:none;margin-top:10px">
+        <div class="uid-display" id="myUIDValue" onclick="copyUID()"></div>
+        <div style="font-size:11px;opacity:.6;margin-top:4px">Click để copy</div>
+        <details style="margin-top:8px">
+          <summary style="font-size:12px;cursor:pointer;opacity:.7">Chi tiết meta</summary>
+          <pre id="myUIDMeta" style="font-size:11px;background:var(--bg-2,#111);padding:8px;border-radius:6px;overflow:auto;max-height:120px;margin-top:6px"></pre>
+        </details>
+      </div>
+    </div>
+
+    <!-- ── Đăng ký UID + Key ── -->
+    <div class="device-block">
+      <div class="device-block-title">🔗 Đăng ký UID với Key</div>
+      <div class="input-group-row">
+        <input id="regKeyCode"  type="text" placeholder="Key code (tuỳ chọn)"  class="input-field">
+        <input id="regLabel"    type="text" placeholder="Nhãn thiết bị"         class="input-field">
+      </div>
+      <button class="btn btn-success" onclick="registerDeviceUID()">Đăng ký</button>
+      <div id="regResult" style="display:none;margin-top:10px"></div>
+    </div>
+
+    <!-- ── Tra cứu theo UID ── -->
+    <div class="device-block">
+      <div class="device-block-title">🔎 Tra cứu theo UID</div>
+      <div class="input-group-row">
+        <input id="lookupUID" type="text" placeholder="DEV-XXXXXXXX-XXXX-XXXX" class="input-field">
+        <button class="btn btn-secondary" onclick="lookupDeviceUID()">Tra cứu</button>
+      </div>
+      <div id="lookupResult" style="display:none;margin-top:10px"></div>
+    </div>
+
+    <!-- ── Key của thiết bị tôi ── -->
+    <div class="device-block">
+      <div class="device-block-title">🗝 Keys của thiết bị này</div>
+      <button class="btn btn-outline" onclick="getMyKeys()" id="btnMyKeys">
+        Xem key đã đăng ký
+      </button>
+      <div id="myKeysResult" style="display:none;margin-top:10px"></div>
+    </div>
+
+  </div>
+</div>
+
+<style>
+.device-block {
+  background: var(--bg-2, rgba(255,255,255,.04));
+  border: 1px solid var(--border, rgba(255,255,255,.08));
+  border-radius: 10px;
+  padding: 14px;
+}
+.device-block-title {
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 10px;
+  opacity: .9;
+}
+.uid-display {
+  font-family: monospace;
+  font-size: 15px;
+  font-weight: 700;
+  background: var(--bg-2, #111);
+  border: 1px solid var(--border, rgba(255,255,255,.1));
+  border-radius: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
+  letter-spacing: 1px;
+  word-break: break-all;
+  color: #6dd5a8;
+  transition: background .2s;
+}
+.uid-display:hover { background: rgba(109,213,168,.1); }
+.input-group-row { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px; }
+.input-group-row .input-field { flex:1; min-width:140px; }
+.key-row-device {
+  background: var(--bg-2, rgba(255,255,255,.04));
+  border: 1px solid var(--border, rgba(255,255,255,.06));
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+.key-row-device .kcode { font-weight:700; font-family:monospace; font-size:14px; color:#4f8ef7; }
+.key-row-device .kexp  { opacity:.7; margin-top:2px; }
+.key-badge { display:inline-block; border-radius:99px; padding:2px 8px; font-size:10px; font-weight:700; margin-left:6px; }
+.key-badge.active  { background:#22c55e22; color:#22c55e; }
+.key-badge.expired { background:#ef444422; color:#ef4444; }
+.btn-outline {
+  background: transparent;
+  border: 1px solid var(--border, rgba(255,255,255,.15));
+  color: inherit;
+  padding: 8px 16px; border-radius:8px; cursor:pointer; font-size:13px;
+  transition: background .15s;
+}
+.btn-outline:hover { background: rgba(255,255,255,.06); }
+</style>
+
+<script>
+// ── Device UID helpers ────────────────────────────────────────
+async function getMyDeviceUID() {
+  const btn = document.getElementById("btnGetUID");
+  btn.disabled = true; btn.textContent = "Đang lấy…";
+  try {
+    const r = await fetch("/api/device-uid");
+    const d = await r.json();
+    if (!d.success) throw new Error(d.message);
+    document.getElementById("myUIDValue").textContent = d.device_uid;
+    document.getElementById("myUIDMeta").textContent  = JSON.stringify(d.meta, null, 2);
+    document.getElementById("myUIDResult").style.display = "block";
+    // Auto-fill lookup field
+    document.getElementById("lookupUID").value = d.device_uid;
+  } catch(e) {
+    alert("Lỗi: " + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = "Lấy UID ngay";
+  }
+}
+
+function copyUID() {
+  const txt = document.getElementById("myUIDValue").textContent;
+  navigator.clipboard?.writeText(txt).then(() => {
+    const el = document.getElementById("myUIDValue");
+    const old = el.textContent;
+    el.textContent = "✅ Đã copy!";
+    setTimeout(() => { el.textContent = old; }, 1200);
+  });
+}
+
+async function registerDeviceUID() {
+  const key_code = document.getElementById("regKeyCode").value.trim();
+  const label    = document.getElementById("regLabel").value.trim();
+  const box      = document.getElementById("regResult");
+  box.style.display = "none";
+  try {
+    const r = await fetch("/api/device-uid/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key_code: key_code || undefined, label: label || undefined })
+    });
+    const d = await r.json();
+    box.style.display = "block";
+    if (d.success) {
+      box.innerHTML = `
+        <div style="color:#22c55e;font-weight:600;margin-bottom:6px">✅ Đăng ký thành công!</div>
+        <div class="uid-display" style="margin-bottom:6px" onclick="navigator.clipboard.writeText('${d.device_uid}')">${d.device_uid}</div>
+        <div style="font-size:12px;opacity:.7">Lần đầu: ${new Date(d.first_seen).toLocaleString("vi-VN")}</div>
+        ${d.key_info ? `
+          <div style="margin-top:8px;padding:8px;background:rgba(79,142,247,.08);border-radius:8px;font-size:12px">
+            🗝 Key: <b>${d.key_info.key_code}</b> · ${d.key_info.type}<br>
+            ⏰ Hết hạn: ${new Date(d.key_info.expires_at).toLocaleString("vi-VN")}<br>
+            📱 Thiết bị: ${d.key_info.devices_used}/${d.key_info.devices_allowed}
+          </div>` : ""}
+      `;
+      document.getElementById("myUIDValue").textContent = d.device_uid;
+      document.getElementById("myUIDResult").style.display = "block";
+    } else {
+      box.innerHTML = `<div style="color:#ef4444">❌ ${d.message}</div>`;
+    }
+  } catch(e) {
+    box.style.display = "block";
+    box.innerHTML = `<div style="color:#ef4444">❌ Lỗi: ${e.message}</div>`;
+  }
+}
+
+async function lookupDeviceUID() {
+  const uid = document.getElementById("lookupUID").value.trim();
+  const box = document.getElementById("lookupResult");
+  box.style.display = "none";
+  if (!uid) return alert("Nhập UID trước");
+  try {
+    const r = await fetch("/api/device-uid/lookup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ uid })
+    });
+    const d = await r.json();
+    box.style.display = "block";
+    if (d.success) {
+      const keysHTML = d.keys.length
+        ? d.keys.map(k => `
+            <div class="key-row-device">
+              <div class="kcode">${k.key_code}
+                <span class="key-badge ${k.is_expired?"expired":"active"}">${k.is_expired?"Hết hạn":"Còn hạn"}</span>
+              </div>
+              <div class="kexp">⏰ ${new Date(k.expires_at).toLocaleString("vi-VN")}
+                ${k.is_expired ? "" : `· còn ${k.days_remaining} ngày`}</div>
+              <div class="kexp">📱 ${k.devices_used}/${k.devices_allowed} thiết bị</div>
+            </div>`).join("")
+        : `<div style="opacity:.6;font-size:12px">Chưa có key nào</div>`;
+      box.innerHTML = `
+        <div style="font-weight:600;margin-bottom:8px;color:#6dd5a8">${d.device_uid}</div>
+        ${d.label ? `<div style="font-size:12px;opacity:.8;margin-bottom:6px">🏷 ${d.label}</div>` : ""}
+        <div style="font-size:11px;opacity:.6;margin-bottom:10px">
+          Lần đầu: ${new Date(d.first_seen).toLocaleString("vi-VN")}<br>
+          Lần cuối: ${new Date(d.last_seen).toLocaleString("vi-VN")}
+        </div>
+        <div style="font-size:12px;font-weight:600;margin-bottom:6px">🗝 Keys (${d.keys.length})</div>
+        ${keysHTML}
+      `;
+    } else {
+      box.innerHTML = `<div style="color:#ef4444">❌ ${d.message}</div>`;
+    }
+  } catch(e) {
+    box.style.display = "block";
+    box.innerHTML = `<div style="color:#ef4444">❌ ${e.message}</div>`;
+  }
+}
+
+async function getMyKeys() {
+  const btn = document.getElementById("btnMyKeys");
+  const box = document.getElementById("myKeysResult");
+  btn.disabled = true; btn.textContent = "Đang tải…";
+  box.style.display = "none";
+  try {
+    const r = await fetch("/api/device-uid/my-keys");
+    const d = await r.json();
+    box.style.display = "block";
+    if (!d.keys.length) {
+      box.innerHTML = `<div style="opacity:.6;font-size:12px">📭 Thiết bị này chưa đăng ký key nào.<br>Dùng mục "Đăng ký UID với Key" ở trên.</div>`;
+    } else {
+      box.innerHTML = `
+        <div style="font-size:11px;opacity:.6;margin-bottom:8px">UID: ${d.device_uid}</div>
+        ${d.keys.map(k => `
+          <div class="key-row-device">
+            <div class="kcode">${k.key_code}
+              <span class="key-badge ${k.is_expired?"expired":"active"}">${k.is_expired?"Hết hạn":"Còn hạn"}</span>
+            </div>
+            <div class="kexp">⏰ ${new Date(k.expires_at).toLocaleString("vi-VN")}
+              ${k.is_expired?"":` · còn ${k.days_remaining} ngày`}</div>
+            <div class="kexp">📱 ${k.devices_used}/${k.devices_allowed} · ✔ ${k.total_verifications} lần verify</div>
+          </div>`).join("")}
+      `;
+    }
+  } catch(e) {
+    box.style.display = "block";
+    box.innerHTML = `<div style="color:#ef4444">❌ ${e.message}</div>`;
+  } finally {
+    btn.disabled = false; btn.textContent = "Xem key đã đăng ký";
+  }
+}
+</script>
+
 </body>
 </html>
