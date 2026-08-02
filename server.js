@@ -1587,6 +1587,347 @@ app.get('/api', async (req, res) => {
   });
 });
 
+
+/* ═══════════════════════════════════════════════════════════
+   DEVICE UID SYSTEM — Lấy / Đăng ký / Tra cứu UID thiết bị
+   ═══════════════════════════════════════════════════════════ */
+
+// ── Helpers ─────────────────────────────────────────────────
+/**
+ * Tạo UID thiết bị bền vững từ nhiều tín hiệu:
+ *  - IP address (X-Forwarded-For → req.ip)
+ *  - User-Agent
+ *  - Accept-Language
+ *  - Giờ tạo (để tránh va chạm nếu cùng máy → thêm salt ngẫu nhiên nhẹ)
+ * Format: DEV-XXXXXXXX-XXXX-XXXX
+ */
+function buildDeviceUID(req) {
+  const ip  = (req.headers["x-forwarded-for"] || "").split(",")[0].trim()
+            || req.ip || req.connection?.remoteAddress || "unknown";
+  const ua  = req.headers["user-agent"]        || "";
+  const lan = req.headers["accept-language"]   || "";
+  const raw = `${ip}|${ua}|${lan}`;
+  const hash = crypto.createHash("sha256").update(raw).digest("hex").toUpperCase();
+  // Format DEV-XXXXXXXX-XXXX-XXXX (đọc dễ hơn)
+  return `DEV-${hash.slice(0,8)}-${hash.slice(8,12)}-${hash.slice(12,16)}`;
+}
+
+function buildDeviceMeta(req) {
+  return {
+    ip: (req.headers["x-forwarded-for"] || "").split(",")[0].trim()
+      || req.ip || "unknown",
+    user_agent: (req.headers["user-agent"] || "").slice(0, 200),
+    language:   req.headers["accept-language"] || "",
+    platform:   req.headers["sec-ch-ua-platform"] || "",
+    mobile:     req.headers["sec-ch-ua-mobile"]   || ""
+  };
+}
+
+// ── 1. GET /api/device-uid ───────────────────────────────────
+/**
+ * Trả về UID của thiết bị đang gọi (tự nhận diện)
+ * Không cần body. Chỉ cần gọi GET.
+ */
+app.get("/api/device-uid", (req, res) => {
+  try {
+    const uid  = buildDeviceUID(req);
+    const meta = buildDeviceMeta(req);
+    res.json({
+      success: true,
+      device_uid: uid,
+      meta,
+      note: "UID được tạo từ IP + User-Agent. Thay đổi mạng/trình duyệt sẽ thay đổi UID."
+    });
+  } catch (err) {
+    console.error("device-uid error:", err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+// ── 2. POST /api/device-uid/register ────────────────────────
+/**
+ * Đăng ký UID thiết bị + gắn tùy chọn vào key
+ * Body: { key_code?: string, label?: string }
+ * - Nếu có key_code → kiểm tra key hợp lệ → ghi device_uid vào key
+ * - Luôn ghi vào devices.json
+ */
+app.post("/api/device-uid/register", async (req, res) => {
+  try {
+    const { key_code, label } = req.body || {};
+    const uid  = buildDeviceUID(req);
+    const meta = buildDeviceMeta(req);
+    const now  = new Date().toISOString();
+
+    // ── Lưu vào devices.json ──────────────────────────────
+    const devices  = await loadDevices();
+    let devRecord  = devices.find(d => d.uid === uid);
+
+    if (!devRecord) {
+      devRecord = {
+        id:         uuidv4(),
+        uid,
+        label:      label || "",
+        meta,
+        keys:       [],
+        first_seen: now,
+        last_seen:  now
+      };
+      devices.push(devRecord);
+    } else {
+      devRecord.last_seen = now;
+      devRecord.meta      = meta;        // refresh metadata
+      if (label) devRecord.label = label;
+    }
+
+    // ── Gắn vào key nếu có ───────────────────────────────
+    let keyInfo = null;
+    if (key_code) {
+      const keys  = await loadKeys();
+      const found = keys.find(k => k.key_code === key_code);
+
+      if (!found) {
+        return res.status(404).json({
+          success: false,
+          message: "Key không tồn tại",
+          error_code: "KEY_NOT_FOUND"
+        });
+      }
+
+      if (new Date(found.expires_at) < new Date()) {
+        return res.status(400).json({
+          success: false,
+          message: "Key đã hết hạn",
+          error_code: "KEY_EXPIRED"
+        });
+      }
+
+      // Ghi device_uid vào key.devices nếu chưa có
+      if (!found.devices.includes(uid)) {
+        if (found.devices.length >= found.allowed_devices) {
+          return res.status(400).json({
+            success: false,
+            message: "Key đã đạt giới hạn thiết bị",
+            error_code: "DEVICE_LIMIT_REACHED",
+            devices_used:    found.devices.length,
+            devices_allowed: found.allowed_devices
+          });
+        }
+        found.devices.push(uid);
+        await saveKeys(keys);
+      }
+
+      // Ghi ngược key_code vào devRecord
+      if (!devRecord.keys.includes(key_code))
+        devRecord.keys.push(key_code);
+
+      keyInfo = {
+        key_code:        found.key_code,
+        type:            found.type,
+        expires_at:      found.expires_at,
+        devices_used:    found.devices.length,
+        devices_allowed: found.allowed_devices
+      };
+    }
+
+    await saveDevices(devices);
+    await logActivity("register_device_uid", "public", "public", { uid, key_code, label });
+
+    res.json({
+      success:    true,
+      device_uid: uid,
+      label:      devRecord.label,
+      first_seen: devRecord.first_seen,
+      last_seen:  devRecord.last_seen,
+      keys:       devRecord.keys,
+      key_info:   keyInfo,
+      meta
+    });
+  } catch (err) {
+    console.error("device-uid/register error:", err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+// ── 3. POST /api/device-uid/lookup ──────────────────────────
+/**
+ * Tra cứu thông tin theo UID (admin hoặc tự tra)
+ * Body: { uid: string }
+ */
+app.post("/api/device-uid/lookup", async (req, res) => {
+  try {
+    const { uid } = req.body || {};
+    if (!uid) {
+      return res.status(400).json({
+        success: false,
+        message: "Thiếu uid",
+        error_code: "MISSING_UID"
+      });
+    }
+
+    const devices = await loadDevices();
+    const record  = devices.find(d => d.uid === uid);
+
+    if (!record) {
+      return res.status(404).json({
+        success: false,
+        message: "Không tìm thấy thiết bị",
+        error_code: "DEVICE_NOT_FOUND"
+      });
+    }
+
+    // Lấy thông tin key gắn với thiết bị
+    const keys    = await loadKeys();
+    const now     = new Date();
+    const keyList = record.keys
+      .map(kc => keys.find(k => k.key_code === kc))
+      .filter(Boolean)
+      .map(k => ({
+        key_code:        k.key_code,
+        type:            k.type,
+        expires_at:      k.expires_at,
+        is_expired:      new Date(k.expires_at) < now,
+        days_remaining:  Math.max(0, Math.ceil((new Date(k.expires_at) - now) / 86400000)),
+        devices_used:    k.devices.length,
+        devices_allowed: k.allowed_devices
+      }));
+
+    res.json({
+      success:    true,
+      device_uid: record.uid,
+      label:      record.label || "",
+      first_seen: record.first_seen,
+      last_seen:  record.last_seen,
+      keys:       keyList,
+      meta:       record.meta || {}
+    });
+  } catch (err) {
+    console.error("device-uid/lookup error:", err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+// ── 4. GET /api/device-uid/my-keys ──────────────────────────
+/**
+ * Lấy tất cả key đã đăng ký với thiết bị hiện tại (tự động nhận diện)
+ */
+app.get("/api/device-uid/my-keys", async (req, res) => {
+  try {
+    const uid     = buildDeviceUID(req);
+    const devices = await loadDevices();
+    const record  = devices.find(d => d.uid === uid);
+
+    if (!record || !record.keys.length) {
+      return res.json({
+        success:    true,
+        device_uid: uid,
+        keys:       [],
+        message:    "Thiết bị này chưa đăng ký key nào"
+      });
+    }
+
+    const keys    = await loadKeys();
+    const now     = new Date();
+    const keyList = record.keys
+      .map(kc => keys.find(k => k.key_code === kc))
+      .filter(Boolean)
+      .map(k => ({
+        key_code:        k.key_code,
+        type:            k.type,
+        expires_at:      k.expires_at,
+        is_expired:      new Date(k.expires_at) < now,
+        days_remaining:  Math.max(0, Math.ceil((new Date(k.expires_at) - now) / 86400000)),
+        devices_used:    k.devices.length,
+        devices_allowed: k.allowed_devices,
+        total_verifications: k.total_verifications || 0
+      }));
+
+    res.json({
+      success:    true,
+      device_uid: uid,
+      label:      record.label || "",
+      first_seen: record.first_seen,
+      last_seen:  record.last_seen,
+      keys:       keyList
+    });
+  } catch (err) {
+    console.error("device-uid/my-keys error:", err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+// ── 5. GET /api/admin/devices (admin only) ───────────────────
+/**
+ * Liệt kê tất cả thiết bị đã đăng ký (admin)
+ */
+app.get("/api/admin/devices", requireAdmin, async (req, res) => {
+  try {
+    const devices  = await loadDevices();
+    const keys     = await loadKeys();
+    const now      = new Date();
+    const limit    = parseInt(req.query.limit) || 100;
+    const page     = parseInt(req.query.page)  || 1;
+    const search   = (req.query.search || "").toLowerCase();
+
+    let filtered = devices;
+    if (search) {
+      filtered = devices.filter(d =>
+        d.uid.toLowerCase().includes(search)           ||
+        (d.label || "").toLowerCase().includes(search) ||
+        (d.meta?.ip || "").toLowerCase().includes(search)
+      );
+    }
+
+    // Sort by last_seen desc
+    filtered.sort((a, b) => new Date(b.last_seen) - new Date(a.last_seen));
+
+    const total    = filtered.length;
+    const paginated = filtered.slice((page-1)*limit, page*limit);
+
+    const result = paginated.map(d => ({
+      ...d,
+      key_count:       d.keys.length,
+      active_key_count: d.keys.filter(kc => {
+        const k = keys.find(k => k.key_code === kc);
+        return k && new Date(k.expires_at) > now;
+      }).length
+    }));
+
+    res.json({
+      success: true,
+      total,
+      page,
+      limit,
+      devices: result
+    });
+  } catch (err) {
+    console.error("admin/devices error:", err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+// ── 6. POST /api/admin/devices/delete (admin only) ──────────
+app.post("/api/admin/devices/delete", requireAdmin, async (req, res) => {
+  try {
+    const { uid } = req.body || {};
+    if (!uid)
+      return res.status(400).json({ success: false, message: "Thiếu uid" });
+
+    let devices = await loadDevices();
+    const before = devices.length;
+    devices = devices.filter(d => d.uid !== uid);
+
+    if (devices.length === before)
+      return res.status(404).json({ success: false, message: "Không tìm thấy thiết bị" });
+
+    await saveDevices(devices);
+    await logActivity("delete_device", "admin", "admin", { uid });
+    res.json({ success: true, message: "Đã xóa thiết bị" });
+  } catch (err) {
+    console.error("admin/devices/delete error:", err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
 app.get('/health', async (req, res) => {
   const used = process.memoryUsage();
   res.json({
