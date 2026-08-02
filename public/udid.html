@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lấy UDID thiết bị</title>
+<style>
+  :root{
+    --bg:#0b0e0c; --panel:#121613; --line:#24302a; --amber:#f5a623; --text:#dfe6e1; --text-dim:#8a968f;
+    --mono:"JetBrains Mono",Consolas,monospace; --sans:"Inter",system-ui,sans-serif;
+  }
+  body{
+    margin:0; min-height:100vh; background:var(--bg); color:var(--text); font-family:var(--sans);
+    display:flex; align-items:center; justify-content:center; padding:20px;
+  }
+  .card{
+    max-width:420px; width:100%; background:var(--panel); border:1px solid var(--line);
+    border-radius:12px; padding:28px; text-align:center;
+  }
+  h1{font-size:17px; margin:0 0 8px;}
+  p{font-size:13px; color:var(--text-dim); line-height:1.5;}
+  button{
+    background:var(--amber); color:#1a1204; border:none; border-radius:8px; padding:13px 24px;
+    font-weight:700; font-size:14px; cursor:pointer; margin-top:18px; width:100%;
+  }
+  button:disabled{opacity:0.5;}
+  .result{
+    margin-top:20px; font-family:var(--mono); font-size:13px; background:#0e120f;
+    border:1px solid var(--line); border-radius:8px; padding:14px; text-align:left; display:none;
+    word-break:break-all;
+  }
+  .result .row{margin-bottom:6px;}
+  .result .k{color:var(--text-dim); font-size:11px; text-transform:uppercase;}
+  .warn{margin-top:16px; font-size:11.5px; color:var(--text-dim);}
+  .spinner{display:none; margin-top:14px; font-family:var(--mono); font-size:12px; color:var(--amber);}
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>📲 Lấy UDID thiết bị</h1>
+    <p>Mở trang này bằng <strong>Safari trên iPhone/iPad</strong>. Nhấn nút bên dưới, cài profile khi được hỏi, UDID sẽ tự hiện ra.</p>
+    <button id="getBtn">Lấy UDID của tôi</button>
+    <div class="spinner" id="spinner">Đang chờ bạn cài profile trong Cài đặt…</div>
+    <div class="result" id="result"></div>
+    <p class="warn">Không lưu trữ mục đích khác ngoài đăng ký thiết bị cho hệ thống key. Chỉ hoạt động trên Safari iOS, không hoạt động trên Android hoặc Chrome.</p>
+  </div>
+
+<script>
+  const session = crypto.randomUUID();
+  const btn = document.getElementById('getBtn');
+  const spinner = document.getElementById('spinner');
+  const resultBox = document.getElementById('result');
+  let poller = null;
+
+  btn.addEventListener('click', () => {
+    btn.disabled = true;
+    spinner.style.display = 'block';
+    window.location.href = `/api/udid/profile?session=${session}`;
+    startPolling();
+  });
+
+  function startPolling() {
+    poller = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/udid/status?session=${session}`);
+        const data = await res.json();
+        if (data.found) {
+          clearInterval(poller);
+          spinner.style.display = 'none';
+          btn.style.display = 'none';
+          resultBox.style.display = 'block';
+          resultBox.innerHTML = `
+            <div class="row"><div class="k">UDID</div>${data.udid || '—'}</div>
+            <div class="row"><div class="k">Model</div>${data.product || '—'}</div>
+            <div class="row"><div class="k">iOS</div>${data.version || '—'}</div>
+            <div class="row"><div class="k">Serial</div>${data.serial || '—'}</div>
+          `;
+        }
+      } catch (e) {}
+    }, 1500);
+    // dừng poll sau 3 phút nếu không ai cài
+    setTimeout(() => { if (poller) clearInterval(poller); }, 180000);
+  }
+</script>
+</body>
+</html>
