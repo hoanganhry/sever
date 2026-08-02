@@ -137,6 +137,9 @@ module.exports = function udidRoutes(publicBaseUrl) {
     try {
       const finalUUID = uuidv4().toUpperCase();
       const payloadUUID = uuidv4().toUpperCase();
+      // Restrictions (com.apple.applicationaccess) bị iOS đời mới chặn khi cài thủ công
+      // trên máy chưa "supervised". Dùng Web Clip thay thế - loại payload này luôn được
+      // phép cài thủ công, chỉ tạo 1 icon nhỏ trên màn hình chính, có thể xóa bất cứ lúc nào.
       const finalPlist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -145,15 +148,25 @@ module.exports = function udidRoutes(publicBaseUrl) {
   <array>
     <dict>
       <key>PayloadType</key>
-      <string>com.apple.applicationaccess</string>
+      <string>com.apple.webClip.managed</string>
       <key>PayloadVersion</key>
       <integer>1</integer>
       <key>PayloadIdentifier</key>
-      <string>com.authapi.restrictions.${session}</string>
+      <string>com.authapi.webclip.${session}</string>
       <key>PayloadUUID</key>
       <string>${payloadUUID}</string>
       <key>PayloadDisplayName</key>
-      <string>Hoan tat dang ky</string>
+      <string>AuthAPI</string>
+      <key>Label</key>
+      <string>AuthAPI</string>
+      <key>URL</key>
+      <string>${publicBaseUrl}/udid.html</string>
+      <key>IsRemovable</key>
+      <true/>
+      <key>FullScreen</key>
+      <false/>
+      <key>Precomposed</key>
+      <true/>
     </dict>
   </array>
   <key>PayloadDisplayName</key>
@@ -175,7 +188,7 @@ module.exports = function udidRoutes(publicBaseUrl) {
     } catch (err) {
       // trường hợp xấu nhất tuyệt đối không được xảy ra, nhưng nếu có, vẫn phải trả 200
       console.error('UDID callback final response error:', err.message);
-      res.status(200).set('Content-Type', 'application/x-apple-aspen-config').send('<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>PayloadContent</key><array><dict><key>PayloadType</key><string>com.apple.applicationaccess</string><key>PayloadVersion</key><integer>1</integer><key>PayloadIdentifier</key><string>com.authapi.restrictions.fallback</string><key>PayloadUUID</key><string>' + uuidv4().toUpperCase() + '</string><key>PayloadDisplayName</key><string>Hoan tat</string></dict></array><key>PayloadDisplayName</key><string>Hoan tat</string><key>PayloadIdentifier</key><string>com.authapi.complete.fallback</string><key>PayloadType</key><string>Configuration</string><key>PayloadUUID</key><string>' + uuidv4().toUpperCase() + '</string><key>PayloadVersion</key><integer>1</integer></dict></plist>');
+      res.status(200).set('Content-Type', 'application/x-apple-aspen-config').send('<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>PayloadContent</key><array><dict><key>PayloadType</key><string>com.apple.webClip.managed</string><key>PayloadVersion</key><integer>1</integer><key>PayloadIdentifier</key><string>com.authapi.webclip.fallback</string><key>PayloadUUID</key><string>' + uuidv4().toUpperCase() + '</string><key>PayloadDisplayName</key><string>AuthAPI</string><key>Label</key><string>AuthAPI</string><key>URL</key><string>' + publicBaseUrl + '/udid.html</string><key>IsRemovable</key><true/></dict></array><key>PayloadDisplayName</key><string>Hoan tat</string><key>PayloadIdentifier</key><string>com.authapi.complete.fallback</string><key>PayloadType</key><string>Configuration</string><key>PayloadUUID</key><string>' + uuidv4().toUpperCase() + '</string><key>PayloadVersion</key><integer>1</integer></dict></plist>');
     }
   });
 
