@@ -62,8 +62,6 @@ module.exports = function udidRoutes(publicBaseUrl) {
       <string>UDID</string>
       <string>VERSION</string>
       <string>PRODUCT</string>
-      <string>SERIAL</string>
-      <string>IMEI</string>
     </array>
   </dict>
   <key>PayloadOrganization</key>
@@ -90,39 +88,69 @@ module.exports = function udidRoutes(publicBaseUrl) {
 
   // Bước 2: iOS POST CMS (DER, ký) chứa UDID về đây. Cần raw body, KHÔNG qua body-parser JSON.
   router.post('/api/udid/callback', express.raw({ type: '*/*', limit: '2mb' }), (req, res) => {
+    const session = req.query.session || 'unknown';
+    let plistXml = null;
+
     try {
-      const session = req.query.session || 'unknown';
-      const derBuffer = req.body; // Buffer nhị phân
+      const buf = req.body;
+      const asText = buf.toString('utf8');
+      const xmlStart = asText.indexOf('<?xml');
+      const xmlEnd = asText.indexOf('</plist>');
 
-      const p7Asn1 = forge.asn1.fromDer(forge.util.createBuffer(derBuffer.toString('binary')));
-      const p7 = forge.pkcs7.messageFromAsn1(p7Asn1);
-      const contentAsn1 = p7.rawCapture.content;
-      // content có thể là OCTETSTRING đơn hoặc constructed — forge trả .value là mảng hoặc chuỗi
-      const rawValue = Array.isArray(contentAsn1.value)
-        ? contentAsn1.value.map(v => v.value).join('')
-        : contentAsn1.value;
-      const plistXml = forge.util.decodeUtf8(rawValue);
+      if (xmlStart !== -1 && xmlEnd !== -1) {
+        // Trường hợp phổ biến: profile chưa ký -> iOS gửi thẳng plist XML dạng text
+        plistXml = asText.substring(xmlStart, xmlEnd + '</plist>'.length);
+      } else {
+        // Trường hợp profile đã ký -> dữ liệu là CMS/PKCS7 nhị phân
+        const p7Asn1 = forge.asn1.fromDer(forge.util.createBuffer(buf.toString('binary')));
+        const p7 = forge.pkcs7.messageFromAsn1(p7Asn1);
+        const contentAsn1 = p7.rawCapture.content;
+        const rawValue = Array.isArray(contentAsn1.value)
+          ? contentAsn1.value.map(v => v.value).join('')
+          : contentAsn1.value;
+        plistXml = forge.util.decodeUtf8(rawValue);
+      }
+    } catch (err) {
+      console.error('UDID callback parse error:', err.message);
+      plistXml = null;
+    }
 
-      const record = {
-        session,
-        udid: extractPlistString(plistXml, 'UDID'),
-        product: extractPlistString(plistXml, 'PRODUCT'),
-        version: extractPlistString(plistXml, 'VERSION'),
-        serial: extractPlistString(plistXml, 'SERIAL'),
-        capturedAt: new Date().toISOString(),
-        ip: req.ip
-      };
-      saveRecord(record);
+    const record = {
+      session,
+      udid: plistXml ? extractPlistString(plistXml, 'UDID') : null,
+      product: plistXml ? extractPlistString(plistXml, 'PRODUCT') : null,
+      version: plistXml ? extractPlistString(plistXml, 'VERSION') : null,
+      capturedAt: new Date().toISOString(),
+      ip: req.ip
+    };
+    saveRecord(record);
 
-      const finalUUID = uuidv4().toUpperCase();
-      const finalPlist = `<?xml version="1.0" encoding="UTF-8"?>
+    // QUAN TRỌNG: PayloadContent không được để rỗng, nếu không iOS báo
+    // "Cài đặt hồ sơ thất bại - Hồ sơ trống". Dùng 1 payload Restrictions
+    // không đặt khóa giới hạn nào -> hợp lệ nhưng không thay đổi gì trên máy.
+    const finalUUID = uuidv4().toUpperCase();
+    const payloadUUID = uuidv4().toUpperCase();
+    const finalPlist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>PayloadContent</key>
-  <array/>
+  <array>
+    <dict>
+      <key>PayloadType</key>
+      <string>com.apple.applicationaccess</string>
+      <key>PayloadVersion</key>
+      <integer>1</integer>
+      <key>PayloadIdentifier</key>
+      <string>com.authapi.restrictions.${session}</string>
+      <key>PayloadUUID</key>
+      <string>${payloadUUID}</string>
+      <key>PayloadDisplayName</key>
+      <string>Hoan tat dang ky</string>
+    </dict>
+  </array>
   <key>PayloadDisplayName</key>
-  <string>Hoan tat</string>
+  <string>Dang ky thiet bi hoan tat</string>
   <key>PayloadIdentifier</key>
   <string>com.authapi.complete.${session}</string>
   <key>PayloadType</key>
@@ -131,14 +159,12 @@ module.exports = function udidRoutes(publicBaseUrl) {
   <string>${finalUUID}</string>
   <key>PayloadVersion</key>
   <integer>1</integer>
+  <key>PayloadRemovalDisallowed</key>
+  <false/>
 </dict>
 </plist>`;
-      res.set('Content-Type', 'application/x-apple-aspen-config');
-      res.send(finalPlist);
-    } catch (err) {
-      console.error('UDID callback error:', err.message);
-      res.status(400).send('Invalid profile response');
-    }
+    res.set('Content-Type', 'application/x-apple-aspen-config');
+    res.send(finalPlist);
   });
 
   // Bước 3: frontend poll để lấy kết quả
