@@ -33,6 +33,17 @@ function saveRecord(record) {
 function findRecord(session) {
   return loadRecords().find(r => r.session === session);
 }
+function updateRecordByUdid(udid, patch) {
+  const records = loadRecords();
+  for (let i = records.length - 1; i >= 0; i--) {
+    if (records[i].udid === udid) {
+      Object.assign(records[i], patch);
+      fs.writeFileSync(DB_FILE, JSON.stringify(records, null, 2));
+      return records[i];
+    }
+  }
+  return null;
+}
 
 // đơn giản: đọc <key>X</key><string>Y</string> từ plist XML thô, khỏi cần thư viện plist
 function extractPlistString(xml, key) {
@@ -197,6 +208,43 @@ module.exports = function udidRoutes(publicBaseUrl) {
     const record = findRecord(req.query.session);
     if (!record) return res.json({ found: false });
     res.json({ found: true, ...record });
+  });
+
+  // Thiết bị tự tra key ĐANG liên kết với chính UDID của nó (chỉ cần biết UDID của mình,
+  // không thấy được UDID/key của thiết bị khác vì phải khớp đúng chuỗi UDID)
+  router.get('/api/udid/my-key', (req, res) => {
+    const udid = req.query.udid;
+    if (!udid) return res.status(400).json({ success: false, message: 'Thiếu udid' });
+    const records = loadRecords().filter(r => r.udid === udid && r.linkedKey);
+    if (records.length === 0) return res.json({ success: true, linked: false });
+    const latest = records[records.length - 1];
+    res.json({ success: true, linked: true, key: latest.linkedKey, linkedAt: latest.linkedAt });
+  });
+
+  // Danh sách toàn bộ UDID đã lấy được (mới nhất trước), kèm key đã liên kết (nếu có)
+  // -> dùng cho trang quản trị index.html, không public trong udid.html
+  router.get('/api/udid/list', (req, res) => {
+    try {
+      const records = loadRecords()
+        .filter(r => r.udid) // bỏ các lần capture lỗi không có UDID
+        .reverse();
+      res.json({ success: true, count: records.length, devices: records });
+    } catch (err) {
+      res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  // Ghi lại UDID này đang dùng key nào (gọi sau khi verify-key ở server chính thành công)
+  router.post('/api/udid/link-key', express.json(), (req, res) => {
+    const { udid, key } = req.body || {};
+    if (!udid || !key) {
+      return res.status(400).json({ success: false, message: 'Thiếu udid hoặc key' });
+    }
+    const updated = updateRecordByUdid(udid, { linkedKey: key, linkedAt: new Date().toISOString() });
+    if (!updated) {
+      return res.status(404).json({ success: false, message: 'Không tìm thấy UDID này trong danh sách đã capture' });
+    }
+    res.json({ success: true, device: updated });
   });
 
   return router;
