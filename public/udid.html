@@ -48,6 +48,11 @@
   .linkMsg{margin-top:10px; font-size:12px; font-family:var(--mono);}
   .linkMsg.ok{color:#7fd9a8;}
   .linkMsg.err{color:#f3a0a0;}
+  .linkedKeyBox{
+    font-family:var(--mono); color:var(--amber); font-size:15px; letter-spacing:0.03em;
+    background:#0e120f; border:1px dashed var(--amber); border-radius:8px;
+    padding:12px 14px; word-break:break-all; font-weight:700;
+  }
 </style>
 </head>
 <body>
@@ -104,12 +109,33 @@
             <div class="row"><div class="k">Model</div>${data.product || '—'}</div>
             <div class="row"><div class="k">iOS</div>${data.version || '—'}</div>
           `;
-          if (capturedUdid) linkBox.style.display = 'block';
+          if (capturedUdid) checkExistingLink();
         }
       } catch (e) {}
     }, 1500);
     // dừng poll sau 3 phút nếu không ai cài
     setTimeout(() => { if (poller) clearInterval(poller); }, 180000);
+  }
+
+  // Thiết bị này tự tra xem UDID của chính nó đã từng liên kết key nào chưa.
+  // Server chỉ trả về key khi UDID gửi lên khớp đúng -> máy khác không tra được key của máy này.
+  async function checkExistingLink() {
+    linkBox.style.display = 'block';
+    try {
+      const r = await fetch(`/api/udid/my-key?udid=${encodeURIComponent(capturedUdid)}`);
+      const d = await r.json();
+      if (d.success && d.linked) {
+        showLinkedState(d.key, d.linkedAt);
+      }
+    } catch (e) {}
+  }
+
+  function showLinkedState(key, linkedAt) {
+    linkBox.innerHTML = `
+      <label>Thiết bị này đã liên kết với key</label>
+      <div class="linkedKeyBox">${key}</div>
+      <div class="linkMsg ok">Liên kết lúc ${linkedAt ? new Date(linkedAt).toLocaleString('vi-VN') : ''}</div>
+    `;
   }
 
   linkBtn.addEventListener('click', async () => {
@@ -138,8 +164,9 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ udid: capturedUdid, key })
       });
-      linkMsg.textContent = '✓ Liên kết thành công! Hết hạn: ' + new Date(verifyData.expires_at).toLocaleDateString('vi-VN');
+      linkMsg.textContent = '✓ Liên kết thành công!';
       linkMsg.className = 'linkMsg ok';
+      setTimeout(() => showLinkedState(key, new Date().toISOString()), 600);
     } catch (e) {
       linkMsg.textContent = '✕ Lỗi kết nối, thử lại';
       linkMsg.className = 'linkMsg err';
