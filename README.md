@@ -23,6 +23,8 @@ Set both dashboard credentials in the hosting provider's private environment-var
 
 The Get UDID page is served directly from the API at `/get-key`; `/udid.html` redirects to this friendly path. Public key-verification, app-package-check, Get UDID flow, profile callback, and device-registration endpoints remain available to client apps.
 
+When the dashboard's **Thiết bị** tab is open, its UDID list refreshes automatically every two seconds so newly captured devices appear without a manual refresh.
+
 Optional AI provider credentials:
 
 - `OPENAI_API_KEY`

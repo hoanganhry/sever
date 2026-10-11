@@ -1217,7 +1217,7 @@ function escapeHtml(value) {
   })[char]);
 }
 
-function filterTable(tableId, inputId) {
+function filterTable(tableId, inputId, preservePage = false) {
   const table = $(tableId);
   if (!table) {
     const pageName = tableId === 'keysTable' ? 'keys' : 'devices';
@@ -1232,7 +1232,7 @@ function filterTable(tableId, inputId) {
     row.dataset.filteredOut = String(!searchableRow.textContent.toLocaleLowerCase('vi').includes(query));
   });
   const pageName = tableId === 'keysTable' ? 'keys' : 'devices';
-  tablePages[pageName] = 1;
+  if (!preservePage) tablePages[pageName] = 1;
   renderTablePage(pageName, rows);
 }
 
@@ -1788,7 +1788,11 @@ async function loadAllKeys() {
 }
 
 /* ---------- devices / UDID ---------- */
+let devicesLoading = false;
+
 async function loadUdidDevices() {
+  if (devicesLoading) return;
+  devicesLoading = true;
   const wrap = $('devicesTableWrap');
   try {
     const { ok, data } = await api('/api/udid/list');
@@ -1814,11 +1818,13 @@ async function loadUdidDevices() {
         <td data-label="Thời gian lấy">${d.capturedAt ? new Date(d.capturedAt).toLocaleString('vi-VN') : '—'}</td>
       </tr>
     `).join('')}</tbody></table>`;
-    filterTable('devicesTable', 'devicesSearch');
+    filterTable('devicesTable', 'devicesSearch', true);
   } catch (error) {
     console.error('Không thể tải danh sách UDID:', error);
     wrap.innerHTML = '<div class="empty-state">Lỗi kết nối khi tải danh sách thiết bị. Vui lòng thử lại.</div>';
     resetTablePage('devices');
+  } finally {
+    devicesLoading = false;
   }
 }
 
@@ -1828,6 +1834,9 @@ if (new URLSearchParams(window.location.search).get('tab') === 'devices') {
   switchTab('devices');
 }
 setInterval(loadOverview, 30000);
+setInterval(() => {
+  if (activeTab === 'devices' && !document.hidden) loadUdidDevices();
+}, 2000);
 </script>
 </body>
 </html>
