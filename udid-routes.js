@@ -1,14 +1,7 @@
-// udid-routes.js
-// Luồng lấy UDID thật của iPhone/iPad qua Configuration Profile (Profile Service).
-// Cách hoạt động:
-//   1) GET  /api/udid/profile   -> trả về file .mobileconfig, thiết bị tải & cài
-//   2) Khi cài, iOS tự POST một gói CMS (ký) chứa UDID về /api/udid/callback
-//   3) Server giải mã CMS, lưu UDID, rồi trả profile hoàn tất có chữ ký CMS
-//   4) GET  /api/udid/status?session=xxx -> frontend poll để lấy UDID vừa capture
-//
+// udid-routes.js (đã sửa)
+// Luồng: GET /api/udid/profile -> iOS cài -> iOS POST CMS chứa UDID về /api/udid/callback
+//        -> server lưu UDID -> trả HTTP 301 về trang /get-key -> trang hoàn tất liên kết key.
 // Yêu cầu: npm install node-forge uuid
-// Yêu cầu: server phải chạy HTTPS với chứng chỉ hợp lệ (Render đã có sẵn) —
-//          iOS sẽ từ chối gửi UDID về nếu domain không phải HTTPS thật.
 
 const express = require('express');
 const forge = require('node-forge');
@@ -20,10 +13,14 @@ const path = require('path');
 const router = express.Router();
 const GET_KEY_FLOW_TTL_MS = 10 * 60 * 1000;
 const getKeyFlows = new Map();
+const failedSessions = new Map(); // session -> lý do lỗi (chỉ để báo cho trang)
 
-const DB_FILE = path.join(__dirname, 'udid_log.json');
+// Dùng cùng DATA_DIR với server.js để dữ liệu nằm trên Persistent Disk (nếu có)
+const DATA_DIR = process.env.DATA_DIR || __dirname;
+const DB_FILE = path.join(DATA_DIR, 'udid_log.json');
 if (!fs.existsSync(DB_FILE)) fs.writeFileSync(DB_FILE, '[]');
-let profileSigningIdentity = null;
+
+const SESSION_RE = /^[A-Za-z0-9-]{8,128}$/;
 
 function loadRecords() {
   try { return JSON.parse(fs.readFileSync(DB_FILE, 'utf8')); }
@@ -34,10 +31,7 @@ function mergeDuplicateUdids(records) {
   const merged = [];
   const indexByUdid = new Map();
   records.forEach(record => {
-    if (!record.udid) {
-      merged.push(record);
-      return;
-    }
+    if (!record.udid) { merged.push(record); return; }
     const existingIndex = indexByUdid.get(record.udid);
     if (existingIndex === undefined) {
       indexByUdid.set(record.udid, merged.length);
@@ -68,9 +62,11 @@ function saveRecord(record) {
   records.push(record);
   fs.writeFileSync(DB_FILE, JSON.stringify(mergeDuplicateUdids(records), null, 2));
 }
+
 function findRecord(session) {
-  return loadRecords().find(r => r.session === session);
+  return loadRecords().find(r => r.session === session && r.udid);
 }
+
 function updateRecordByUdid(udid, patch, session = null) {
   const records = mergeDuplicateUdids(loadRecords());
   for (let i = records.length - 1; i >= 0; i--) {
@@ -114,58 +110,62 @@ function completeGetKeyFlow(flowId) {
   return getKeyFlows.delete(flowId);
 }
 
-// đơn giản: đọc <key>X</key><string>Y</string> từ plist XML thô, khỏi cần thư viện plist
+function xmlEscape(value) {
+  return String(value).replace(/[&<>"']/g, c => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[c]
+  ));
+}
+
 function extractPlistString(xml, key) {
   const re = new RegExp(`<key>${key}</key>\\s*<string>(.*?)</string>`, 's');
   const m = xml.match(re);
-  return m ? m[1] : null;
+  return m ? m[1].trim() : null;
 }
 
-function createSignedProfile(profile) {
-  if (!profileSigningIdentity) {
-    const keys = forge.pki.rsa.generateKeyPair({ bits: 2048, e: 0x10001 });
-    const certificate = forge.pki.createCertificate();
-    certificate.publicKey = keys.publicKey;
-    certificate.serialNumber = crypto.randomBytes(16).toString('hex');
-    certificate.validity.notBefore = new Date(Date.now() - 60_000);
-    certificate.validity.notAfter = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
-    certificate.setSubject([
-      { name: 'commonName', value: 'AuthAPI Profile Service' },
-      { name: 'organizationName', value: 'AuthAPI' }
-    ]);
-    certificate.setIssuer(certificate.subject.attributes);
-    certificate.setExtensions([
-      { name: 'basicConstraints', cA: false },
-      { name: 'keyUsage', digitalSignature: true }
-    ]);
-    certificate.sign(keys.privateKey, forge.md.sha256.create());
-    profileSigningIdentity = { certificate, privateKey: keys.privateKey };
+// Lấy plist XML từ body iOS gửi về (CMS/PKCS7 có chứa plist dạng text, hoặc plist thô)
+function extractPlistFromBody(buf) {
+  if (!Buffer.isBuffer(buf) || buf.length === 0) return null;
+  const asText = buf.toString('latin1');
+  const xmlStart = asText.indexOf('<?xml');
+  const xmlEnd = asText.indexOf('</plist>');
+  if (xmlStart !== -1 && xmlEnd !== -1) {
+    return asText.substring(xmlStart, xmlEnd + '</plist>'.length);
   }
-
-  const signedData = forge.pkcs7.createSignedData();
-  signedData.content = forge.util.createBuffer(profile, 'utf8');
-  signedData.addSigner({
-    key: profileSigningIdentity.privateKey,
-    certificate: profileSigningIdentity.certificate,
-    digestAlgorithm: forge.pki.oids.sha256,
-    authenticatedAttributes: [
-      { type: forge.pki.oids.contentType, value: forge.pki.oids.data },
-      { type: forge.pki.oids.messageDigest },
-      { type: forge.pki.oids.signingTime, value: new Date() }
-    ]
-  });
-  signedData.sign();
-  return Buffer.from(forge.asn1.toDer(signedData.toAsn1()).getBytes(), 'binary');
+  // Dự phòng: giải mã CMS bằng node-forge
+  try {
+    const p7Asn1 = forge.asn1.fromDer(forge.util.createBuffer(buf.toString('binary')));
+    const p7 = forge.pkcs7.messageFromAsn1(p7Asn1);
+    const contentAsn1 = p7.rawCapture.content;
+    const rawValue = Array.isArray(contentAsn1.value)
+      ? contentAsn1.value.map(v => v.value).join('')
+      : contentAsn1.value;
+    return forge.util.decodeUtf8(rawValue);
+  } catch (err) {
+    console.error('[UDID] forge parse error:', err.message);
+    return null;
+  }
 }
 
 module.exports = function udidRoutes(publicBaseUrl, getUdidPageUrl) {
+  // Nếu bạn KHÔNG đặt PUBLIC_BASE_URL trên Render, tự suy ra từ request (ép https).
+  function resolveBase(req) {
+    if (process.env.PUBLIC_BASE_URL) return publicBaseUrl;
+    const proto = (req.get('x-forwarded-proto') || 'https').split(',')[0].trim();
+    return `${proto === 'http' ? 'https' : proto}://${req.get('host')}`;
+  }
 
-  // Bước 1: sinh file cấu hình để thiết bị cài
+  // Log mọi request /api/udid/* (router này nằm TRƯỚC logger chung của server.js nên nếu không có dòng này sẽ không thấy log)
+  router.use('/api/udid', (req, res, next) => {
+    console.info(`[UDID] ${req.method} ${req.path} ct=${req.get('content-type') || '-'}`);
+    next();
+  });
+
+  // Bước 1: file cấu hình để thiết bị cài
   router.get('/api/udid/profile', (req, res) => {
-    console.info('[UDID] Profile Service profile requested');
-    const session = req.query.session || uuidv4();
-    const callbackUrl = `${publicBaseUrl}/api/udid/callback?session=${session}`;
-    const payloadUUID = uuidv4().toUpperCase();
+    const requested = typeof req.query.session === 'string' ? req.query.session : '';
+    const session = SESSION_RE.test(requested) ? requested : uuidv4();
+    const callbackUrl = `${resolveBase(req)}/api/udid/callback?session=${session}`;
+    console.info('[UDID] callbackUrl =', callbackUrl);
 
     const plist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -174,7 +174,7 @@ module.exports = function udidRoutes(publicBaseUrl, getUdidPageUrl) {
   <key>PayloadContent</key>
   <dict>
     <key>URL</key>
-    <string>${callbackUrl}</string>
+    <string>${xmlEscape(callbackUrl)}</string>
     <key>DeviceAttributes</key>
     <array>
       <string>UDID</string>
@@ -191,7 +191,7 @@ module.exports = function udidRoutes(publicBaseUrl, getUdidPageUrl) {
   <key>PayloadVersion</key>
   <integer>1</integer>
   <key>PayloadUUID</key>
-  <string>${payloadUUID}</string>
+  <string>${uuidv4().toUpperCase()}</string>
   <key>PayloadIdentifier</key>
   <string>com.authapi.profileservice.${session}</string>
   <key>PayloadType</key>
@@ -199,151 +199,70 @@ module.exports = function udidRoutes(publicBaseUrl, getUdidPageUrl) {
 </dict>
 </plist>`;
 
-    res.status(200)
-      .set('Content-Type', 'application/x-apple-aspen-config')
-      .send(createSignedProfile(plist));
+    res.set({
+      'Content-Type': 'application/x-apple-aspen-config',
+      'Content-Disposition': 'attachment; filename="udid.mobileconfig"',
+      'Cache-Control': 'no-store'
+    });
+    res.send(plist);
   });
 
-  // Bước 2: iOS POST CMS (DER, ký) chứa UDID về đây. Cần raw body, KHÔNG qua body-parser JSON.
-  router.post('/api/udid/callback', express.raw({ type: '*/*', limit: '2mb' }), (req, res) => {
+  // Bước 2: iOS POST UDID về đây. Cần raw body.
+  router.post('/api/udid/callback', express.raw({ type: () => true, limit: '2mb' }), (req, res) => {
+    const requested = typeof req.query.session === 'string' ? req.query.session : '';
+    const session = SESSION_RE.test(requested) ? requested : 'unknown';
     const bodyBytes = Buffer.isBuffer(req.body) ? req.body.length : 0;
-    console.info(`[UDID] Callback received (${bodyBytes} bytes; ${req.get('content-type') || 'unknown content type'})`);
-    res.on('finish', () => {
-      console.info(`[UDID] Callback finished with HTTP ${res.statusCode}`);
-    });
+    console.info(`[UDID] Callback received (${bodyBytes} bytes)`);
 
-    const session = req.query.session || 'unknown';
-    let plistXml = null;
-
-    // Bước 2a: đọc dữ liệu thiết bị gửi về (không được để lỗi này làm mất phản hồi)
+    let udid = null;
     try {
-      const buf = req.body;
-      const asText = buf.toString('utf8');
-      const xmlStart = asText.indexOf('<?xml');
-      const xmlEnd = asText.indexOf('</plist>');
-
-      if (xmlStart !== -1 && xmlEnd !== -1) {
-        // Trường hợp phổ biến: profile chưa ký -> iOS gửi thẳng plist XML dạng text
-        plistXml = asText.substring(xmlStart, xmlEnd + '</plist>'.length);
-      } else {
-        // Trường hợp profile đã ký -> dữ liệu là CMS/PKCS7 nhị phân
-        const p7Asn1 = forge.asn1.fromDer(forge.util.createBuffer(buf.toString('binary')));
-        const p7 = forge.pkcs7.messageFromAsn1(p7Asn1);
-        const contentAsn1 = p7.rawCapture.content;
-        const rawValue = Array.isArray(contentAsn1.value)
-          ? contentAsn1.value.map(v => v.value).join('')
-          : contentAsn1.value;
-        plistXml = forge.util.decodeUtf8(rawValue);
+      const plistXml = extractPlistFromBody(req.body);
+      if (plistXml) {
+        udid = extractPlistString(plistXml, 'UDID');
+        if (udid) {
+          saveRecord({
+            session,
+            udid,
+            product: extractPlistString(plistXml, 'PRODUCT'),
+            version: extractPlistString(plistXml, 'VERSION'),
+            capturedAt: new Date().toISOString(),
+            ip: req.ip
+          });
+        }
       }
     } catch (err) {
-      console.error('UDID callback parse error:', err.message);
-      plistXml = null;
+      console.error('[UDID] callback error:', err.message);
     }
+    console.info(`[UDID] UDID ${udid ? 'captured' : 'MISSING'} (session ${session.slice(0, 8)}…)`);
+    if (!udid) failedSessions.set(session, 'Không đọc được UDID từ thiết bị.');
 
-    // Bước 2b: lưu log (không được để lỗi ghi file làm mất phản hồi cho thiết bị)
-    try {
-      const record = {
-        session,
-        udid: plistXml ? extractPlistString(plistXml, 'UDID') : null,
-        product: plistXml ? extractPlistString(plistXml, 'PRODUCT') : null,
-        version: plistXml ? extractPlistString(plistXml, 'VERSION') : null,
-        capturedAt: new Date().toISOString(),
-        ip: req.ip
-      };
-      saveRecord(record);
-      console.info(`[UDID] Callback parsed; UDID ${record.udid ? 'captured' : 'missing'}`);
-    } catch (err) {
-      console.error('UDID callback save error:', err.message);
+    // Apple yêu cầu server trả 301 để Safari tiếp tục mở trang kết quả.
+    const target = new URL(getUdidPageUrl);
+    if (process.env.PUBLIC_BASE_URL === undefined) {
+      const base = new URL(resolveBase(req));
+      target.protocol = base.protocol;
+      target.host = base.host;
     }
-
-    // Bước 2c: LUÔN trả lời thiết bị bằng 1 profile hợp lệ, dù bước trên có lỗi hay không.
-    // QUAN TRỌNG: PayloadContent không được để rỗng, nếu không iOS báo
-    // "Cài đặt hồ sơ thất bại - Hồ sơ trống". Dùng 1 payload Restrictions
-    // không đặt khóa giới hạn nào -> hợp lệ nhưng không thay đổi gì trên máy.
-    try {
-      const finalUUID = uuidv4().toUpperCase();
-      const payloadUUID = uuidv4().toUpperCase();
-      // Restrictions (com.apple.applicationaccess) bị iOS đời mới chặn khi cài thủ công
-      // trên máy chưa "supervised". Dùng Web Clip thay thế - loại payload này luôn được
-      // phép cài thủ công, chỉ tạo 1 icon nhỏ trên màn hình chính, có thể xóa bất cứ lúc nào.
-      const finalPlist = `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>PayloadContent</key>
-  <array>
-    <dict>
-      <key>PayloadType</key>
-      <string>com.apple.webClip.managed</string>
-      <key>PayloadVersion</key>
-      <integer>1</integer>
-      <key>PayloadIdentifier</key>
-      <string>com.authapi.webclip.${session}</string>
-      <key>PayloadUUID</key>
-      <string>${payloadUUID}</string>
-      <key>PayloadDisplayName</key>
-      <string>AuthAPI</string>
-      <key>Label</key>
-      <string>AuthAPI</string>
-      <key>URL</key>
-      <string>${getUdidPageUrl}</string>
-      <key>IsRemovable</key>
-      <true/>
-      <key>FullScreen</key>
-      <false/>
-      <key>Precomposed</key>
-      <true/>
-    </dict>
-  </array>
-  <key>PayloadDisplayName</key>
-  <string>Dang ky thiet bi hoan tat</string>
-  <key>PayloadIdentifier</key>
-  <string>com.authapi.complete.${session}</string>
-  <key>PayloadType</key>
-  <string>Configuration</string>
-  <key>PayloadUUID</key>
-  <string>${finalUUID}</string>
-  <key>PayloadVersion</key>
-  <integer>1</integer>
-  <key>PayloadRemovalDisallowed</key>
-  <false/>
-</dict>
-</plist>`;
-      res.status(200)
-        .set('Content-Type', 'application/x-apple-aspen-config')
-        .send(createSignedProfile(finalPlist));
-    } catch (err) {
-      // Không trả thành công giả khi không thể tạo profile đã ký.
-      console.error('UDID callback final response error:', err.message);
-      const fallbackPlist = `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict><key>PayloadContent</key><array><dict>
-<key>PayloadType</key><string>com.apple.webClip.managed</string>
-<key>PayloadVersion</key><integer>1</integer>
-<key>PayloadIdentifier</key><string>com.authapi.webclip.fallback</string>
-<key>PayloadUUID</key><string>${uuidv4().toUpperCase()}</string>
-<key>PayloadDisplayName</key><string>AuthAPI</string>
-<key>Label</key><string>AuthAPI</string>
-<key>URL</key><string>${getUdidPageUrl}</string>
-<key>IsRemovable</key><true/>
-</dict></array><key>PayloadDisplayName</key><string>Hoan tat</string>
-<key>PayloadIdentifier</key><string>com.authapi.complete.fallback</string>
-<key>PayloadType</key><string>Configuration</string>
-<key>PayloadUUID</key><string>${uuidv4().toUpperCase()}</string>
-<key>PayloadVersion</key><integer>1</integer></dict></plist>`;
-      res.status(500).json({ success: false, message: 'Không thể tạo profile hoàn tất cho thiết bị.' });
+    const flow = getGetKeyFlow(session);
+    if (flow) {
+      target.searchParams.set('flow', session);
+      if (flow.packageId) target.searchParams.set('packageId', flow.packageId);
+    } else {
+      target.searchParams.set('session', session);
     }
+    return res.redirect(301, target.toString());
   });
 
-  // Bước 3: frontend poll để lấy kết quả
+  // Bước 3: trang poll để lấy kết quả
   router.get('/api/udid/status', (req, res) => {
-    const record = findRecord(req.query.session);
-    if (!record) return res.json({ found: false });
-    res.json({ found: true, ...record });
+    res.set('Cache-Control', 'no-store');
+    const session = typeof req.query.session === 'string' ? req.query.session : '';
+    const record = findRecord(session);
+    if (record) return res.json({ found: true, ...record });
+    if (failedSessions.has(session)) return res.json({ found: false, failed: true, message: failedSessions.get(session) });
+    res.json({ found: false });
   });
 
-  // Thiết bị tự tra key ĐANG liên kết với chính UDID của nó (chỉ cần biết UDID của mình,
-  // không thấy được UDID/key của thiết bị khác vì phải khớp đúng chuỗi UDID)
   router.get('/api/udid/my-key', (req, res) => {
     const udid = req.query.udid;
     if (!udid) return res.status(400).json({ success: false, message: 'Thiếu udid' });
@@ -368,8 +287,7 @@ module.exports = function udidRoutes(publicBaseUrl, getUdidPageUrl) {
     });
   });
 
-  // Danh sách toàn bộ UDID đã lấy được (mới nhất trước), kèm key đã liên kết (nếu có)
-  // -> dùng cho trang quản trị index.html, không public trong udid.html
+  // Danh sách UDID (đã được dashboardPasswordAuth bảo vệ trong server.js)
   router.get('/api/udid/list', (req, res) => {
     try {
       const sourceRecords = loadRecords();
@@ -384,7 +302,6 @@ module.exports = function udidRoutes(publicBaseUrl, getUdidPageUrl) {
     }
   });
 
-  // Ghi lại UDID này đang dùng key nào (gọi sau khi verify-key ở server chính thành công)
   router.post('/api/udid/link-key', express.json(), (req, res) => {
     const { udid, key, flowId } = req.body || {};
     if (!udid || !key) {
