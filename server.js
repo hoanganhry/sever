@@ -166,7 +166,6 @@ app.use((err, req, res, next) => {
 /* ================= MIDDLEWARE ================= */
 app.use(cors());
 app.use(bodyParser.json({ limit: '10mb' }));
-app.use(express.static('public'));
 app.get(['/get-key', '/udid.html'], (req, res) => {
   if (req.path === '/udid.html') {
     const query = new URLSearchParams();
@@ -178,8 +177,9 @@ app.get(['/get-key', '/udid.html'], (req, res) => {
     const suffix = query.size ? `?${query.toString()}` : '';
     return res.redirect(302, `/get-key${suffix}`);
   }
-  res.sendFile(path.join(__dirname, 'edgeone-getudid', 'index.html'));
+  res.sendFile(path.join(__dirname, 'public', 'udid.html'));
 });
+app.use(express.static('public'));
 
 app.use((req, res, next) => {
   const startTime = Date.now();
