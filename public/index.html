@@ -384,6 +384,112 @@
     .create-dialog,.created-keys-dialog,.success-operation-dialog,.key-edit-dialog{max-height:calc(100vh - 20px); padding:14px;}
     .created-key-row{align-items:flex-start;}
   }
+
+  /* ===== Package list (redesign) ===== */
+  .pkg-head{display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:4px;}
+  .pkg-head h2{margin:0 0 4px!important;}
+  .pkg-head p{margin:0; color:#9ba3b1; font-size:12.5px; line-height:1.5;}
+  .pkg-summary{display:flex; gap:10px; flex-wrap:wrap; margin:14px 0 4px;}
+  .pkg-chip{display:inline-flex; align-items:center; gap:8px; padding:7px 12px; border:1px solid #e8eaf0; border-radius:999px; background:#fafbfe; color:#596477; font-size:12px;}
+  .pkg-chip b{font-weight:600; color:#39445a;}
+  .pkg-chip i{width:8px; height:8px; border-radius:50%; background:#9aa3b5; display:inline-block;}
+  .pkg-chip i.on{background:var(--green);} .pkg-chip i.off{background:var(--red);}
+  .package-table-wrap table{min-width:860px; table-layout:fixed;}
+  .package-table-wrap th{border-right:0; text-align:left;}
+  .package-table-wrap td{vertical-align:middle; padding:14px 12px;}
+  .package-table-wrap col.c-name{width:24%;} .package-table-wrap col.c-status{width:15%;}
+  .package-table-wrap col.c-message{width:27%;} .package-table-wrap col.c-update{width:14%;}
+  .package-table-wrap col.c-keys{width:9%;} .package-table-wrap col.c-actions{width:11%;}
+  .pkg-name{display:flex; align-items:center; gap:11px; min-width:0;}
+  .pkg-avatar{flex:none; width:36px; height:36px; border-radius:9px; background:var(--amber-soft); color:var(--amber); display:flex; align-items:center; justify-content:center; font:600 14px var(--sans);}
+  .pkg-name strong{display:block; color:#39445a; font-size:13px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .pkg-name code{display:block; margin-top:2px; color:#9099aa; font:11px var(--mono); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .pkg-status{display:flex; align-items:center; gap:10px; white-space:nowrap;}
+  .pkg-switch{position:relative; flex:none; width:38px; height:22px; padding:0; border:0; border-radius:999px; background:#cfd4df; cursor:pointer; transition:background .18s;}
+  .pkg-switch::after{content:""; position:absolute; top:3px; left:3px; width:16px; height:16px; border-radius:50%; background:#fff; box-shadow:0 1px 3px rgba(32,43,68,.3); transition:transform .18s;}
+  .pkg-switch[aria-checked="true"]{background:var(--green);}
+  .pkg-switch[aria-checked="true"]::after{transform:translateX(16px);}
+  .pkg-switch:focus-visible{outline:2px solid var(--amber); outline-offset:2px;}
+  .pkg-switch:disabled{opacity:.5; cursor:wait;}
+  .pkg-state{font-size:12px; font-weight:500;}
+  .pkg-state.on{color:#46aa5b;} .pkg-state.off{color:#df4c51;}
+  .pkg-msg{display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; color:#596477; font-size:12.5px; line-height:1.5; word-break:break-word;}
+  .pkg-msg.empty{color:#b3bac7; font-style:italic;}
+  .pkg-link{display:inline-block; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px;}
+  .pkg-muted{color:#b3bac7; font-size:12px;}
+  .pkg-keycount{display:inline-flex; align-items:center; justify-content:center; min-width:28px; padding:3px 9px; border-radius:999px; background:#f0f0ff; color:#6468ee; font:600 12px var(--sans);}
+  .pkg-keycount.zero{background:#f5f6f8; color:#9aa3b5;}
+  .pkg-edit-btn{white-space:nowrap;}
+  /* edit modal */
+  .pkg-modal{position:fixed; inset:0; z-index:33; display:flex; align-items:center; justify-content:center; padding:20px; background:rgba(25,34,52,.48);}
+  .pkg-modal[hidden]{display:none;}
+  .pkg-dialog{width:min(640px,100%); max-height:calc(100vh - 40px); display:flex; flex-direction:column; background:#fff; border:1px solid #e8eaf0; border-radius:10px; box-shadow:0 16px 50px rgba(22,32,50,.22); overflow:hidden;}
+  .pkg-dialog-head{display:flex; align-items:flex-start; justify-content:space-between; gap:12px; padding:18px 22px 14px; border-bottom:1px solid #edf0f5;}
+  .pkg-dialog-head h3{margin:0; font-size:16px; font-weight:600; color:#39445a;}
+  .pkg-dialog-head code{display:block; margin-top:3px; font:11.5px var(--mono); color:#9099aa;}
+  .pkg-close{width:30px; height:30px; padding:0; border:0; border-radius:6px; background:transparent; color:#7d8797; font-size:20px; cursor:pointer;}
+  .pkg-close:hover{background:#f3f4ff; color:var(--amber);}
+  .pkg-dialog-body{padding:18px 22px; overflow:auto; display:grid; gap:18px;}
+  .pkg-field label{display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px; font-size:12px; font-weight:600; color:#596477;}
+  .pkg-field label span{font-weight:400; color:#9099aa; font-size:11px;}
+  .pkg-field input,.pkg-field textarea{width:100%;}
+  .pkg-field textarea{min-height:104px; line-height:1.5; resize:vertical;}
+  .pkg-help{margin:6px 0 0; font-size:11.5px; color:#9099aa; line-height:1.5;}
+  .pkg-keys-box{border:1px solid #e8eaf0; border-radius:8px; padding:12px; background:#fafbfe;}
+  .pkg-keys-list{display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px; max-height:120px; overflow:auto;}
+  .pkg-keychip{display:inline-flex; align-items:center; gap:6px; max-width:100%; padding:4px 6px 4px 10px; border:1px solid #dedfff; border-radius:999px; background:#f0f0ff; color:#4b4fd0; font:11.5px var(--mono);}
+  .pkg-keychip span{overflow:hidden; text-overflow:ellipsis;}
+  .pkg-keychip button{width:18px; height:18px; padding:0; border:0; border-radius:50%; background:transparent; color:#6468ee; cursor:pointer; font-size:14px; line-height:1;}
+  .pkg-keychip button:hover{background:#dedfff;}
+  .pkg-keys-empty{color:#b3bac7; font-size:12px; font-style:italic;}
+  .pkg-keyadd{display:flex; gap:8px;} .pkg-keyadd input{flex:1; min-width:0;}
+  .pkg-dialog-foot{display:flex; justify-content:space-between; align-items:center; gap:10px; padding:14px 22px; border-top:1px solid #edf0f5; background:#fafbfe;}
+  .pkg-dialog-foot .grp{display:flex; gap:8px; flex-wrap:wrap;}
+  button.btn.secondary.pkg-delete{color:#df4c51; border-color:#f5d0d1;}
+  button.btn.secondary.pkg-delete:hover{background:#fff0f0; border-color:#f0b4b6; color:#df4c51;}
+  .pkg-feedback{padding:0 22px 14px; font-size:12px;} .pkg-feedback.ok{color:#398d50;} .pkg-feedback.err{color:#c64448;}
+  @media(max-width:600px){
+    .package-table-wrap table{min-width:860px;}
+    .pkg-dialog-foot{flex-direction:column-reverse; align-items:stretch;} .pkg-dialog-foot .grp{justify-content:flex-end;}
+  }
+
+  /* ===== Overview redesign ===== */
+  .ov-head{display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:4px;}
+  .ov-head h2{margin:0 0 4px!important;} .ov-head .sub{margin:0 0 12px;}
+  .res-totals{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin:6px 0 14px;}
+  .res-total{display:flex; flex-direction:column; gap:3px; padding:12px 14px; border:1px solid #e8eaf0; border-radius:8px; background:#fafbfe;}
+  .res-total .n{font:600 20px var(--sans); color:#39445a;} .res-total .l{font-size:11.5px; color:#9099aa;}
+  .res-total.ok{background:#effaf0; border-color:#d9f0dc;} .res-total.ok .n{color:#2f9a4a;}
+  .res-list{display:grid; gap:8px; max-height:300px; overflow:auto;}
+  .res-item{display:flex; align-items:center; gap:12px; padding:11px 13px; border:1px solid #e8eaf0; border-radius:8px; background:#fff; border-left:3px solid #cfd4df;}
+  .res-item.on{border-left-color:var(--green); background:linear-gradient(90deg,#f4fbf5,#fff 40%);}
+  .res-item.off{border-left-color:var(--red);}
+  .res-dot{flex:none; width:9px; height:9px; border-radius:50%; background:#cfd4df;}
+  .res-item.on .res-dot{background:var(--green); box-shadow:0 0 0 4px rgba(82,189,113,.18); animation:pulse 1.8s ease-in-out infinite;}
+  .res-item.off .res-dot{background:var(--red);}
+  .res-main{flex:1; min-width:0;} .res-main strong{display:block; color:#39445a; font-size:13px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .res-main code{display:block; margin-top:2px; color:#9099aa; font:11px var(--mono); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .res-keys{flex:none; font-size:11.5px; color:#7d8797; white-space:nowrap;}
+  .res-state{flex:none; font-size:11px; font-weight:600; padding:3px 10px; border-radius:999px; white-space:nowrap;}
+  .res-item.on .res-state{color:#2f9a4a; background:#e3f6e7;} .res-item.off .res-state{color:#df4c51; background:#fff0f0;}
+  .notif-list{display:grid; gap:10px; max-height:360px; overflow:auto;}
+  .notif-item{display:flex; gap:12px; padding:12px 13px; border:1px solid #e8eaf0; border-radius:8px; background:#fff;}
+  .notif-icon{flex:none; width:32px; height:32px; border-radius:8px; background:var(--amber-soft); color:var(--amber); display:flex; align-items:center; justify-content:center; font-size:15px;}
+  .notif-body{min-width:0; flex:1;}
+  .notif-top{display:flex; justify-content:space-between; align-items:baseline; gap:10px; flex-wrap:wrap;}
+  .notif-top strong{font-size:12.5px; color:#39445a;} .notif-top time{font-size:11px; color:#9099aa;}
+  .notif-msg{margin:4px 0 0; font-size:12.5px; line-height:1.55; color:#596477; white-space:pre-wrap; word-break:break-word;}
+  .ov-side{display:grid; gap:14px; align-content:start;} .ov-side .panel{margin-bottom:0;}
+  .ver-list{margin:0; display:grid; gap:0;}
+  .ver-list div{display:flex; justify-content:space-between; gap:12px; padding:10px 0; border-bottom:1px solid #edf0f5; font-size:13px;}
+  .ver-list div:last-child{border-bottom:0;} .ver-list dt{color:#9099aa;} .ver-list dd{margin:0; color:#39445a; font-weight:600;}
+  .tag.beta{color:#d9822b; background:#fff4e5; border-color:#fde1bd; font-weight:700; letter-spacing:.04em;}
+  .tiktok-card{display:flex; align-items:center; gap:12px; padding:12px 14px; border-radius:10px; background:#0f1115; color:#fff; text-decoration:none; transition:transform .12s, box-shadow .12s;}
+  .tiktok-card:hover{text-decoration:none; transform:translateY(-1px); box-shadow:0 8px 20px rgba(15,17,21,.25);}
+  .tiktok-logo{flex:none; width:38px; height:38px; border-radius:9px; background:#1b1e25; display:flex; align-items:center; justify-content:center; box-shadow:-2px -2px 0 #25f4ee, 2px 2px 0 #fe2c55;}
+  .tiktok-text{flex:1; min-width:0;} .tiktok-text strong{display:block; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .tiktok-text small{color:#a8afbd; font-size:11.5px;} .tiktok-arrow{color:#a8afbd; font-size:16px;}
+  @media(max-width:600px){ .res-totals{grid-template-columns:1fr 1fr 1fr; gap:6px;} .res-total{padding:10px;} .res-item{flex-wrap:wrap;} }
 </style>
 </head>
 <body>
@@ -440,17 +546,25 @@
     </div>
     <div class="dashboard-grid">
       <div class="panel dashboard-feature">
-        <h2>Thông tin hệ thống</h2>
-        <p class="sub">Trạng thái API và thông tin dịch vụ hiện tại</p>
-        <div class="feature-value" id="serviceName">AuthAPI</div>
-        <div id="apiFeatureList" class="hint">Đang tải thông tin hệ thống…</div>
-        <div class="divider"></div>
-        <div class="hint">Thời gian hoạt động: <strong id="dashboardUptime">—</strong></div>
+        <div class="ov-head">
+          <div>
+            <h2>Gói tài nguyên</h2>
+            <p class="sub">Các gói đang có trên hệ thống và trạng thái hoạt động</p>
+          </div>
+          <button class="btn secondary" onclick="switchTab('packages')">Quản lý gói</button>
+        </div>
+        <div class="res-totals">
+          <div class="res-total"><span class="n" id="resTotalKeys">—</span><span class="l">Tổng số key</span></div>
+          <div class="res-total"><span class="n" id="resTotalPackages">—</span><span class="l">Tổng số gói</span></div>
+          <div class="res-total ok"><span class="n" id="resActivePackages">—</span><span class="l">Gói đang hoạt động</span></div>
+        </div>
+        <div class="res-list" id="resPackageList"><div class="empty-state">Đang tải danh sách gói…</div></div>
       </div>
       <div class="panel dashboard-feature">
         <h2>Trạng thái kết nối</h2>
         <p class="sub">Kết nối trực tiếp đến API cùng origin</p>
         <div class="feature-value" id="dashboardConnection">Đang kiểm tra…</div>
+        <div class="hint">Thời gian hoạt động: <strong id="dashboardUptime">—</strong></div>
         <div class="hint">Dữ liệu được nạp tự động và cập nhật định kỳ.</div>
         <div class="row" style="margin-top:20px;">
           <button class="btn secondary" onclick="loadOverview()">Làm mới tổng quan</button>
@@ -459,28 +573,58 @@
     </div>
     <div class="dashboard-lower">
       <div class="panel">
-        <h2>Truy cập nhanh</h2>
-        <p class="sub">Các thao tác quản lý cá nhân</p>
-        <div class="toolbar-actions">
-          <button class="btn" onclick="switchTab('create')">Tạo key</button>
-          <button class="btn secondary" onclick="switchTab('keys')">Danh sách key</button>
-          <a class="btn secondary" href="/get-key" target="_blank" rel="noopener">Get Key / Đăng ký thiết bị</a>
+        <div class="ov-head">
+          <div>
+            <h2>Thông báo hệ thống</h2>
+            <p class="sub">Các tin nhắn đã gửi đến app</p>
+          </div>
+          <span class="pkg-keycount" id="notifCount">0</span>
         </div>
+        <div class="notif-list" id="notifList"><div class="empty-state">Đang tải thông báo…</div></div>
       </div>
-      <div class="panel">
-        <h2>Ghi chú</h2>
-        <p class="sub">Dev:Hoàng Xuân Tú </p>
-        <div class="hint">Service: AuthAPI - App - Menu - File API</div>
+      <div class="ov-side">
+        <div class="panel">
+          <h2>Phiên bản</h2>
+          <p class="sub">Thông tin bản phát hành hiện tại</p>
+          <dl class="ver-list">
+            <div><dt>Phiên bản</dt><dd><span id="versionNumber">—</span> <span class="tag beta">BETA</span></dd></div>
+            <div><dt>Phát triển bởi</dt><dd>Hoàng Xuân Tú</dd></div>
+          </dl>
+        </div>
+        <div class="panel">
+          <h2>Kênh TikTok</h2>
+          <p class="sub">Theo dõi cập nhật và hướng dẫn mới nhất</p>
+          <a class="tiktok-card" href="https://www.tiktok.com/@hoangxuantu_real190708" target="_blank" rel="noopener noreferrer">
+            <span class="tiktok-logo" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M16.6 5.8A4.3 4.3 0 0 1 15.5 3h-3.1v12.4a2.6 2.6 0 1 1-1.9-2.5V9.7a5.7 5.7 0 1 0 5 5.7V9.1a7.4 7.4 0 0 0 4.3 1.4V7.4a4.3 4.3 0 0 1-3.2-1.6z"/></svg>
+            </span>
+            <span class="tiktok-text"><strong>@hoangxuantu_real190708</strong><small>tiktok.com · Mở kênh</small></span>
+            <span class="tiktok-arrow" aria-hidden="true">↗</span>
+          </a>
+        </div>
+        <div class="panel">
+          <h2>Truy cập nhanh</h2>
+          <p class="sub">Các thao tác quản lý cá nhân</p>
+          <div class="toolbar-actions">
+            <button class="btn" onclick="switchTab('create')">Tạo key</button>
+            <button class="btn secondary" onclick="switchTab('keys')">Danh sách key</button>
+            <a class="btn secondary" href="/get-key" target="_blank" rel="noopener">Get Key / Đăng ký thiết bị</a>
+          </div>
+        </div>
       </div>
     </div>
   </section>
 
   <section class="tab-panel" id="tab-packages" style="display:none;">
     <div class="panel package-list-panel">
-      <h2>Danh sách packages</h2>
-      <div class="toolbar-actions">
+      <div class="pkg-head">
+        <div>
+          <h2>Danh sách packages</h2>
+          <p>Quản lý trạng thái, tin nhắn và key của từng gói ứng dụng.</p>
+        </div>
         <button class="btn" onclick="openPackageCreateModal()">＋ Tạo gói</button>
       </div>
+      <div class="pkg-summary" id="packagesSummary"></div>
       <div class="table-toolbar package-toolbar">
         <div class="toolbar-actions">
           <button class="btn secondary" onclick="loadPackages()">⟳ Refresh</button>
@@ -499,7 +643,7 @@
         <button id="packagesPrev" onclick="changePackagesPage(-1)" aria-label="Trang trước">‹</button>
         <button id="packagesNext" onclick="changePackagesPage(1)" aria-label="Trang sau">›</button>
       </div>
-      <div class="hint">Lưu tin nhắn để app nhận nội dung ở lần kiểm tra API kế tiếp. App cần kiểm tra khi mở và định kỳ; đây không phải thông báo đẩy khi app đang đóng.</div>
+      <div class="hint">Tin nhắn được gửi cho app ở lần kiểm tra API kế tiếp, <b>cả khi gói đang bật lẫn đã tắt</b>. App cần kiểm tra khi mở và định kỳ; đây không phải thông báo đẩy khi app đang đóng.</div>
       <div id="packagesActionOut" class="out" style="display:none;"></div>
     </div>
     <div class="package-create-modal" id="packageCreateModal" hidden onclick="if(event.target===this)closePackageCreateModal()">
@@ -516,6 +660,51 @@
           <button class="btn" type="submit">Tạo gói</button>
         </div>
       </form>
+    </div>
+
+    <div class="pkg-modal" id="packageEditModal" hidden onclick="if(event.target===this)closePackageEdit()">
+      <div class="pkg-dialog" role="dialog" aria-modal="true" aria-labelledby="pkgEditTitle">
+        <div class="pkg-dialog-head">
+          <div><h3 id="pkgEditTitle">Chỉnh sửa gói</h3><code id="pkgEditId"></code></div>
+          <button class="pkg-close" type="button" onclick="closePackageEdit()" aria-label="Đóng">×</button>
+        </div>
+        <div class="pkg-dialog-body">
+          <div class="pkg-field">
+            <label for="pkgEditName">Tên gói</label>
+            <input id="pkgEditName" maxlength="80">
+          </div>
+          <div class="pkg-field">
+            <label for="pkgEditMessage">Tin nhắn gửi đến app <span id="pkgEditCount">0/500</span></label>
+            <textarea id="pkgEditMessage" maxlength="500" placeholder="Ví dụ: Hệ thống bảo trì đến 22:00, vui lòng quay lại sau."></textarea>
+            <p class="pkg-help">Hiển thị trong app ở lần kiểm tra kế tiếp, không phụ thuộc gói đang bật hay tắt.</p>
+          </div>
+          <div class="pkg-field">
+            <label for="pkgEditUrl">Link cập nhật</label>
+            <input id="pkgEditUrl" type="url" maxlength="2048" placeholder="https://...">
+          </div>
+          <div class="pkg-field">
+            <label>Key đã gắn <span id="pkgEditKeyCount"></span></label>
+            <div class="pkg-keys-box">
+              <div class="pkg-keys-list" id="pkgEditKeys"></div>
+              <div class="pkg-keyadd">
+                <input id="pkgEditKeyInput" placeholder="Nhập key để gắn vào gói" onkeydown="if(event.key==='Enter'){event.preventDefault();assignPackageKey(false)}">
+                <button class="btn secondary" type="button" onclick="assignPackageKey(false)">Gắn key</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="pkg-feedback" id="pkgEditFeedback" hidden></div>
+        <div class="pkg-dialog-foot">
+          <div class="grp">
+            <button class="btn secondary" type="button" id="pkgEditToggle" onclick="togglePackageFromModal()"></button>
+            <button class="btn secondary pkg-delete" type="button" onclick="deletePackage()">Xóa gói</button>
+          </div>
+          <div class="grp">
+            <button class="btn secondary" type="button" onclick="closePackageEdit()">Đóng</button>
+            <button class="btn" type="button" id="pkgEditSave" onclick="savePackage()">Lưu thay đổi</button>
+          </div>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -779,14 +968,15 @@ let packagesPage = 1;
 let activeTab = 'overview';
 let createReturnTab = 'overview';
 const packageColumns = [
-  ['name', 'Tên package'],
-  ['id', 'Mã package'],
-  ['message', 'Tin nhắn'],
-  ['update', 'Link cập nhật'],
-  ['keys', 'Key đã gắn'],
+  ['name', 'Gói ứng dụng'],
   ['status', 'Trạng thái'],
-  ['actions', 'Thao tác']
+  ['message', 'Tin nhắn gửi app'],
+  ['update', 'Link cập nhật'],
+  ['keys', 'Keys'],
+  ['actions', '']
 ];
+const packageRecords = new Map();
+let editingPackageId = null;
 const visiblePackageColumns = new Set(packageColumns.map(([id]) => id));
 
 /* ---------- tabs ---------- */
@@ -803,6 +993,7 @@ function switchTab(tab, createMode = 'single') {
   document.querySelectorAll('.tab-panel').forEach(panel => {
     panel.style.display = panel.id === 'tab-' + tab ? 'block' : 'none';
   });
+  if (tab === 'overview') loadOverview();
   if (tab === 'devices') loadUdidDevices();
   if (tab === 'keys') loadAllKeys();
   if (tab === 'packages') loadPackages();
@@ -998,19 +1189,13 @@ async function loadPackages() {
       showOut($('packagesActionOut'), data, false);
       return;
     }
-    wrap.innerHTML = `<table id="packageTable"><thead><tr>
-      ${packageColumns.map(([id, label]) => `<th data-column="${id}">${label}</th>`).join('')}
-    </tr></thead><tbody>${data.packages.length ? `
-      ${data.packages.map(appPackage => `<tr data-package-id="${escapeHtml(appPackage.id)}">
-        <td data-label="Tên package" data-column="name">${escapeHtml(appPackage.name)}</td>
-        <td data-label="Mã package" data-column="id"><span class="mono-cell">${escapeHtml(appPackage.id)}</span></td>
-        <td data-label="Tin nhắn" data-column="message"><textarea class="package-message" maxlength="500" aria-label="Tin nhắn cho ${escapeHtml(appPackage.id)}">${escapeHtml(appPackage.message || '')}</textarea></td>
-        <td data-label="Link cập nhật" data-column="update"><input class="package-update-url" type="url" maxlength="2048" value="${escapeHtml(appPackage.updateUrl || '')}" aria-label="Link cập nhật ${escapeHtml(appPackage.id)}"></td>
-        <td data-label="Key đã gắn" data-column="keys"><div>${(appPackage.assignedKeys || []).length ? appPackage.assignedKeys.map(key => `<div class="mono-cell">${escapeHtml(key)}</div>`).join('') : '—'}</div><input class="package-key" placeholder="Nhập key" aria-label="Key cho gói ${escapeHtml(appPackage.id)}"><div class="toolbar-actions"><button class="btn secondary" onclick="assignPackageKey(this,false)">Gắn</button><button class="btn secondary" onclick="assignPackageKey(this,true)">Bỏ</button></div></td>
-        <td data-label="Trạng thái" data-column="status"><span class="tag ${appPackage.enabled ? 'live' : 'expired'}">${appPackage.enabled ? 'đang bật' : 'đã tắt'}</span></td>
-        <td data-label="Thao tác" data-column="actions"><div class="toolbar-actions"><button class="btn secondary" onclick="savePackage(this)">Lưu &amp; gửi tin nhắn</button><button class="btn ${appPackage.enabled ? 'danger' : ''}" data-enabled="${appPackage.enabled}" onclick="togglePackage(this)">${appPackage.enabled ? 'Vô hiệu hóa gói' : 'Bật gói'}</button></div></td>
-      </tr>`).join('')}
-    ` : `<tr><td colspan="${packageColumns.length}" class="empty-state">No rows</td></tr>`}</tbody></table>`;
+    packageRecords.clear();
+    data.packages.forEach(appPackage => packageRecords.set(appPackage.id, appPackage));
+    renderPackageSummary(data.packages);
+    const colClass = { name: 'c-name', status: 'c-status', message: 'c-message', update: 'c-update', keys: 'c-keys', actions: 'c-actions' };
+    wrap.innerHTML = `<table id="packageTable"><colgroup>${packageColumns.map(([id]) => `<col class="${colClass[id]}">`).join('')}</colgroup><thead><tr>
+      ${packageColumns.map(([id, label]) => `<th data-column="${id}"${id === 'actions' ? ' data-noexport' : ''}>${label}</th>`).join('')}
+    </tr></thead><tbody>${data.packages.length ? data.packages.map(renderPackageRow).join('') : `<tr><td colspan="${packageColumns.length}" class="empty-state">Chưa có package nào. Bấm “＋ Tạo gói” để bắt đầu.</td></tr>`}</tbody></table>`;
     data.packages.forEach(appPackage => {
       const row = wrap.querySelector(`[data-package-id="${CSS.escape(appPackage.id)}"]`);
       if (row) {
@@ -1153,57 +1338,187 @@ function applyPackageColumnVisibility() {
   });
 }
 
-async function savePackage(button) {
-  const row = button.closest('tr');
-  const packageId = row.dataset.packageId;
-  const body = {
-    message: row.querySelector('.package-message').value,
-    updateUrl: row.querySelector('.package-update-url').value
-  };
-  const { ok, data } = await api(`/api/admin/packages/${encodeURIComponent(packageId)}`, {
-    method: 'PATCH',
-    body: JSON.stringify(body)
-  });
-  showOut($('packagesActionOut'), data, ok && data.success);
-  if (ok && data.success) {
-    showOut($('packagesActionOut'), 'Đã cập nhật nội dung. App sẽ nhận tin nhắn ở lần kiểm tra API kế tiếp.', true);
-    await loadPackages();
+function renderPackageSummary(packages) {
+  const on = packages.filter(p => p.enabled).length;
+  const keys = packages.reduce((sum, p) => sum + (p.assignedKeys || []).length, 0);
+  $('packagesSummary').innerHTML = packages.length ? `
+    <span class="pkg-chip"><b>${packages.length}</b> gói</span>
+    <span class="pkg-chip"><i class="on"></i><b>${on}</b> đang bật</span>
+    <span class="pkg-chip"><i class="off"></i><b>${packages.length - on}</b> đã tắt</span>
+    <span class="pkg-chip"><b>${keys}</b> key đã gắn</span>` : '';
+}
+
+function renderPackageRow(appPackage) {
+  const id = escapeHtml(appPackage.id);
+  const keyCount = (appPackage.assignedKeys || []).length;
+  const message = (appPackage.message || '').trim();
+  const url = (appPackage.updateUrl || '').trim();
+  const initial = escapeHtml((appPackage.name || appPackage.id || '?').trim().charAt(0).toUpperCase());
+  return `<tr data-package-id="${id}">
+    <td data-label="Gói ứng dụng" data-column="name"><div class="pkg-name"><div class="pkg-avatar">${initial}</div><div style="min-width:0;"><strong title="${escapeHtml(appPackage.name)}">${escapeHtml(appPackage.name)}</strong><code>${id}</code></div></div></td>
+    <td data-label="Trạng thái" data-column="status"><div class="pkg-status">
+      <button type="button" class="pkg-switch" role="switch" aria-checked="${appPackage.enabled ? 'true' : 'false'}" aria-label="Bật hoặc tắt gói ${id}" onclick="togglePackage('${id}', this)"></button>
+      <span class="pkg-state ${appPackage.enabled ? 'on' : 'off'}">${appPackage.enabled ? 'Đang bật' : 'Đã tắt'}</span></div></td>
+    <td data-label="Tin nhắn gửi app" data-column="message">${message ? `<div class="pkg-msg" title="${escapeHtml(message)}">${escapeHtml(message)}</div>` : '<div class="pkg-msg empty">Chưa có tin nhắn</div>'}</td>
+    <td data-label="Link cập nhật" data-column="update">${url ? `<a class="pkg-link" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(url)}">${escapeHtml(url.replace(/^https?:\/\//i, ''))}</a>` : '<span class="pkg-muted">—</span>'}</td>
+    <td data-label="Keys" data-column="keys"><span class="pkg-keycount ${keyCount ? '' : 'zero'}">${keyCount}</span></td>
+    <td data-label="Thao tác" data-column="actions" data-noexport><button type="button" class="btn secondary pkg-edit-btn" onclick="openPackageEdit('${id}')">Chỉnh sửa</button></td>
+  </tr>`;
+}
+
+function setPackageFeedback(message, ok) {
+  const box = $('pkgEditFeedback');
+  box.hidden = !message;
+  box.className = 'pkg-feedback ' + (ok ? 'ok' : 'err');
+  box.textContent = message || '';
+}
+
+function renderPackageEditKeys(appPackage) {
+  const keys = appPackage.assignedKeys || [];
+  $('pkgEditKeyCount').textContent = keys.length ? `${keys.length} key` : '';
+  $('pkgEditKeys').innerHTML = keys.length
+    ? keys.map(key => `<span class="pkg-keychip"><span title="${escapeHtml(key)}">${escapeHtml(key)}</span><button type="button" aria-label="Bỏ key ${escapeHtml(key)}" data-key="${escapeHtml(key)}" onclick="removePackageKey(this.dataset.key)">×</button></span>`).join('')
+    : '<span class="pkg-keys-empty">Chưa có key nào được gắn.</span>';
+}
+
+function fillPackageEdit(appPackage) {
+  $('pkgEditTitle').textContent = appPackage.name || 'Chỉnh sửa gói';
+  $('pkgEditId').textContent = appPackage.id;
+  $('pkgEditName').value = appPackage.name || '';
+  $('pkgEditMessage').value = appPackage.message || '';
+  $('pkgEditUrl').value = appPackage.updateUrl || '';
+  $('pkgEditCount').textContent = `${$('pkgEditMessage').value.length}/500`;
+  const toggle = $('pkgEditToggle');
+  toggle.textContent = appPackage.enabled ? 'Vô hiệu hóa gói' : 'Bật gói';
+  toggle.classList.toggle('danger', Boolean(appPackage.enabled));
+  toggle.classList.toggle('secondary', !appPackage.enabled);
+  renderPackageEditKeys(appPackage);
+}
+
+function openPackageEdit(packageId) {
+  const appPackage = packageRecords.get(packageId);
+  if (!appPackage) return;
+  editingPackageId = packageId;
+  fillPackageEdit(appPackage);
+  $('pkgEditKeyInput').value = '';
+  setPackageFeedback('', true);
+  $('packageEditModal').hidden = false;
+  document.body.classList.add('modal-open');
+  $('pkgEditMessage').focus();
+}
+
+function closePackageEdit() {
+  $('packageEditModal').hidden = true;
+  document.body.classList.remove('modal-open');
+  editingPackageId = null;
+}
+
+$('pkgEditMessage').addEventListener('input', event => {
+  $('pkgEditCount').textContent = `${event.target.value.length}/500`;
+});
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && !$('packageEditModal').hidden) closePackageEdit();
+});
+
+async function refreshPackagesKeepModal() {
+  await Promise.all([loadPackages(), loadActivePackages()]);
+  if (editingPackageId && packageRecords.has(editingPackageId)) fillPackageEdit(packageRecords.get(editingPackageId));
+}
+
+async function savePackage() {
+  if (!editingPackageId) return;
+  const name = $('pkgEditName').value.trim();
+  if (!name) { setPackageFeedback('Tên gói không được để trống.', false); return; }
+  const saveBtn = $('pkgEditSave');
+  saveBtn.disabled = true;
+  try {
+    const { ok, data } = await api(`/api/admin/packages/${encodeURIComponent(editingPackageId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ name, message: $('pkgEditMessage').value, updateUrl: $('pkgEditUrl').value.trim() })
+    });
+    if (ok && data.success) {
+      await refreshPackagesKeepModal();
+      setPackageFeedback('Đã lưu. App sẽ nhận tin nhắn ở lần kiểm tra API kế tiếp.', true);
+    } else {
+      setPackageFeedback(data.message || 'Không lưu được thay đổi.', false);
+    }
+  } finally {
+    saveBtn.disabled = false;
   }
 }
 
-async function togglePackage(button) {
-  const row = button.closest('tr');
-  const packageId = row.dataset.packageId;
-  const enabled = button.dataset.enabled !== 'true';
+async function setPackageEnabled(packageId, enabled) {
   const prompt = enabled
     ? `Bật lại gói "${packageId}"?`
     : `Tắt gói "${packageId}"? App đã dùng gói này sẽ nhận thông báo và phải xử lý trạng thái khóa.`;
-  if (!confirm(prompt)) return;
+  if (!confirm(prompt)) return false;
   const { ok, data } = await api(`/api/admin/packages/${encodeURIComponent(packageId)}`, {
     method: 'PATCH',
     body: JSON.stringify({ enabled })
   });
-  showOut($('packagesActionOut'), data, ok && data.success);
-  if (ok && data.success) {
-    await Promise.all([loadPackages(), loadActivePackages()]);
+  if (!(ok && data.success)) {
+    showOut($('packagesActionOut'), data, false);
+    setPackageFeedback(data.message || 'Không đổi được trạng thái.', false);
+    return false;
   }
+  $('packagesActionOut').style.display = 'none';
+  await refreshPackagesKeepModal();
+  return true;
 }
 
-async function assignPackageKey(button, remove) {
-  const row = button.closest('tr');
-  const packageId = row.dataset.packageId;
-  const key = row.querySelector('.package-key').value.trim();
-  if (!key) {
-    showOut($('packagesActionOut'), 'Nhập key cần gắn hoặc bỏ khỏi gói.', false);
-    return;
-  }
-  const { ok, data } = await api(`/api/admin/packages/${encodeURIComponent(packageId)}/keys`, {
+async function togglePackage(packageId, button) {
+  const appPackage = packageRecords.get(packageId);
+  if (!appPackage) return;
+  button.disabled = true;
+  try { await setPackageEnabled(packageId, !appPackage.enabled); }
+  finally { button.disabled = false; }
+}
+
+async function togglePackageFromModal() {
+  if (!editingPackageId) return;
+  const appPackage = packageRecords.get(editingPackageId);
+  if (appPackage) await setPackageEnabled(editingPackageId, !appPackage.enabled);
+}
+
+async function changePackageKey(key, remove) {
+  if (!editingPackageId) return;
+  if (!key) { setPackageFeedback('Nhập key cần gắn vào gói.', false); return; }
+  const { ok, data } = await api(`/api/admin/packages/${encodeURIComponent(editingPackageId)}/keys`, {
     method: 'POST',
     body: JSON.stringify({ key, remove })
   });
-  showOut($('packagesActionOut'), data, ok && data.success);
-  if (ok && data.success) await loadPackages();
+  if (ok && data.success) {
+    $('pkgEditKeyInput').value = '';
+    await refreshPackagesKeepModal();
+    setPackageFeedback(remove ? 'Đã bỏ key khỏi gói.' : 'Đã gắn key vào gói.', true);
+  } else {
+    setPackageFeedback(data.message || 'Không cập nhật được key.', false);
+  }
 }
+
+async function deletePackage() {
+  if (!editingPackageId) return;
+  const appPackage = packageRecords.get(editingPackageId);
+  if (!appPackage) return;
+  const keyCount = (appPackage.assignedKeys || []).length;
+  if (keyCount > 0) {
+    setPackageFeedback(`Gói còn ${keyCount} key đang gắn. Hãy bỏ hết key khỏi gói trước khi xóa.`, false);
+    return;
+  }
+  if (!confirm(`Xóa vĩnh viễn gói "${appPackage.name}" (${appPackage.id})?\nApp đang dùng gói này sẽ không còn tìm thấy gói.`)) return;
+  const { ok, data } = await api(`/api/admin/packages/${encodeURIComponent(editingPackageId)}`, { method: 'DELETE' });
+  if (!(ok && data.success)) {
+    setPackageFeedback(data.message || 'Không xóa được gói.', false);
+    return;
+  }
+  const deletedId = editingPackageId;
+  closePackageEdit();
+  await Promise.all([loadPackages(), loadActivePackages()]);
+  showOut($('packagesActionOut'), `Đã xóa gói "${deletedId}".`, true);
+}
+
+function assignPackageKey(remove) { return changePackageKey($('pkgEditKeyInput').value.trim(), remove); }
+function removePackageKey(key) { return changePackageKey(key, true); }
 
 function showOut(el, payload, ok) {
   el.style.display = 'block';
@@ -1513,7 +1828,7 @@ function exportTable(tableId, filename) {
   const table = $(tableId);
   if (!table) return;
   const rows = [...table.querySelectorAll('tr')].filter(row => !row.hidden);
-  const csv = rows.map(row => [...row.querySelectorAll('th,td')].filter(cell => !cell.classList.contains('select-column'))
+  const csv = rows.map(row => [...row.querySelectorAll('th,td')].filter(cell => !cell.classList.contains('select-column') && !cell.hasAttribute('data-noexport'))
     .map(cell => '"' + cell.innerText.replace(/"/g, '""') + '"').join(',')).join('\r\n');
   const link = document.createElement('a');
   link.href = URL.createObjectURL(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' }));
@@ -1559,14 +1874,58 @@ async function loadOverview() {
       : '—';
     $('overviewStats').querySelector('[data-stat="active"]').textContent = active;
 
-    if (info.ok && info.data.features) {
-      $('serviceName').textContent = info.data.name || 'AuthAPI';
-      $('apiFeatureList').textContent = info.data.features.join(' · ');
-    }
+    if (info.ok && info.data.version) $('versionNumber').textContent = 'v' + info.data.version;
+    else $('versionNumber').textContent = '—';
+
+    await Promise.all([loadResourcePackages(keys.length), loadSystemNotifications()]);
   } catch (e) {
     dot.className = 'status-dot bad';
     txt.textContent = 'lỗi kết nối';
     $('dashboardConnection').textContent = 'Lỗi kết nối API';
+  }
+}
+
+/* ---------- overview: packages + notifications ---------- */
+async function loadResourcePackages(totalKeys) {
+  const list = $('resPackageList');
+  try {
+    const { ok, data } = await api('/api/admin/packages');
+    if (!ok || !data.success) throw new Error(data.message || 'Không tải được gói');
+    const packages = data.packages || [];
+    const active = packages.filter(p => p.enabled).length;
+    $('resTotalKeys').textContent = totalKeys;
+    $('resTotalPackages').textContent = packages.length;
+    $('resActivePackages').textContent = active;
+    list.innerHTML = packages.length ? packages.map(p => `
+      <div class="res-item ${p.enabled ? 'on' : 'off'}">
+        <span class="res-dot"></span>
+        <div class="res-main"><strong title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</strong><code>${escapeHtml(p.id)}</code></div>
+        <span class="res-keys">${(p.assignedKeys || []).length} key</span>
+        <span class="res-state">${p.enabled ? 'Hoạt động' : 'Đã tắt'}</span>
+      </div>`).join('') : '<div class="empty-state">Chưa có gói nào. Vào tab Gói ứng dụng để tạo gói.</div>';
+  } catch (error) {
+    console.error('Không thể tải gói tài nguyên:', error);
+    list.innerHTML = '<div class="empty-state">Không tải được danh sách gói.</div>';
+  }
+}
+
+async function loadSystemNotifications() {
+  const list = $('notifList');
+  try {
+    const { ok, data } = await api('/api/admin/notifications?limit=20');
+    if (!ok || !data.success) throw new Error(data.message || 'Không tải được thông báo');
+    $('notifCount').textContent = data.total;
+    list.innerHTML = data.notifications.length ? data.notifications.map(n => `
+      <div class="notif-item">
+        <div class="notif-icon" aria-hidden="true">✉</div>
+        <div class="notif-body">
+          <div class="notif-top"><strong>${escapeHtml(n.packageName)}</strong><time>${n.sentAt ? new Date(n.sentAt).toLocaleString('vi-VN') : ''}</time></div>
+          <p class="notif-msg">${escapeHtml(n.message)}</p>
+        </div>
+      </div>`).join('') : '<div class="empty-state">Chưa có thông báo nào được gửi đi.</div>';
+  } catch (error) {
+    console.error('Không thể tải thông báo hệ thống:', error);
+    list.innerHTML = '<div class="empty-state">Không tải được thông báo hệ thống.</div>';
   }
 }
 
