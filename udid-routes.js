@@ -3,7 +3,7 @@
 // Cách hoạt động:
 //   1) GET  /api/udid/profile   -> trả về file .mobileconfig, thiết bị tải & cài
 //   2) Khi cài, iOS tự POST một gói CMS (ký) chứa UDID về /api/udid/callback
-//   3) Server giải mã CMS, lấy UDID, lưu lại, trả về 1 profile "hoàn tất" rỗng
+//   3) Server giải mã CMS, lưu UDID, rồi trả profile hoàn tất có chữ ký CMS
 //   4) GET  /api/udid/status?session=xxx -> frontend poll để lấy UDID vừa capture
 //
 // Yêu cầu: npm install node-forge uuid
@@ -23,6 +23,7 @@ const getKeyFlows = new Map();
 
 const DB_FILE = path.join(__dirname, 'udid_log.json');
 if (!fs.existsSync(DB_FILE)) fs.writeFileSync(DB_FILE, '[]');
+let profileSigningIdentity = null;
 
 function loadRecords() {
   try { return JSON.parse(fs.readFileSync(DB_FILE, 'utf8')); }
@@ -118,6 +119,43 @@ function extractPlistString(xml, key) {
   const re = new RegExp(`<key>${key}</key>\\s*<string>(.*?)</string>`, 's');
   const m = xml.match(re);
   return m ? m[1] : null;
+}
+
+function createSignedProfile(profile) {
+  if (!profileSigningIdentity) {
+    const keys = forge.pki.rsa.generateKeyPair({ bits: 2048, e: 0x10001 });
+    const certificate = forge.pki.createCertificate();
+    certificate.publicKey = keys.publicKey;
+    certificate.serialNumber = crypto.randomBytes(16).toString('hex');
+    certificate.validity.notBefore = new Date(Date.now() - 60_000);
+    certificate.validity.notAfter = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
+    certificate.setSubject([
+      { name: 'commonName', value: 'AuthAPI Profile Service' },
+      { name: 'organizationName', value: 'AuthAPI' }
+    ]);
+    certificate.setIssuer(certificate.subject.attributes);
+    certificate.setExtensions([
+      { name: 'basicConstraints', cA: false },
+      { name: 'keyUsage', digitalSignature: true }
+    ]);
+    certificate.sign(keys.privateKey, forge.md.sha256.create());
+    profileSigningIdentity = { certificate, privateKey: keys.privateKey };
+  }
+
+  const signedData = forge.pkcs7.createSignedData();
+  signedData.content = forge.util.createBuffer(profile, 'utf8');
+  signedData.addSigner({
+    key: profileSigningIdentity.privateKey,
+    certificate: profileSigningIdentity.certificate,
+    digestAlgorithm: forge.pki.oids.sha256,
+    authenticatedAttributes: [
+      { type: forge.pki.oids.contentType, value: forge.pki.oids.data },
+      { type: forge.pki.oids.messageDigest },
+      { type: forge.pki.oids.signingTime, value: new Date() }
+    ]
+  });
+  signedData.sign();
+  return Buffer.from(forge.asn1.toDer(signedData.toAsn1()).getBytes(), 'binary');
 }
 
 module.exports = function udidRoutes(publicBaseUrl, getUdidPageUrl) {
@@ -262,10 +300,11 @@ module.exports = function udidRoutes(publicBaseUrl, getUdidPageUrl) {
   <false/>
 </dict>
 </plist>`;
-      res.set('Content-Type', 'application/x-apple-aspen-config');
-      res.status(200).send(finalPlist);
+      res.status(200)
+        .set('Content-Type', 'application/x-apple-aspen-config')
+        .send(createSignedProfile(finalPlist));
     } catch (err) {
-      // trường hợp xấu nhất tuyệt đối không được xảy ra, nhưng nếu có, vẫn phải trả 200
+      // Không trả thành công giả khi không thể tạo profile đã ký.
       console.error('UDID callback final response error:', err.message);
       const fallbackPlist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -283,7 +322,7 @@ module.exports = function udidRoutes(publicBaseUrl, getUdidPageUrl) {
 <key>PayloadType</key><string>Configuration</string>
 <key>PayloadUUID</key><string>${uuidv4().toUpperCase()}</string>
 <key>PayloadVersion</key><integer>1</integer></dict></plist>`;
-      res.status(200).set('Content-Type', 'application/x-apple-aspen-config').send(fallbackPlist);
+      res.status(500).json({ success: false, message: 'Không thể tạo profile hoàn tất cho thiết bị.' });
     }
   });
 
