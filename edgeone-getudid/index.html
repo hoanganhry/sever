@@ -251,6 +251,9 @@
       linkKeyInput.value = flowData.key;
       document.getElementById('linkPackageId').value = flowData.packageId || '';
       await linkKeyToDevice(flowData.key, flowData.packageId || '', getKeyFlowId);
+      linkMsg.textContent = 'Liên kết thành công. Đang chuyển về danh sách thiết bị…';
+      linkMsg.className = 'linkMsg ok';
+      window.setTimeout(() => window.location.assign('/?tab=devices'), 1800);
     } catch (error) {
       linkMsg.textContent = '✕ ' + error.message;
       linkMsg.className = 'linkMsg err';
