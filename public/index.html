@@ -1824,6 +1824,9 @@ async function loadUdidDevices() {
 
 /* ---------- init ---------- */
 loadOverview();
+if (new URLSearchParams(window.location.search).get('tab') === 'devices') {
+  switchTab('devices');
+}
 setInterval(loadOverview, 30000);
 </script>
 </body>
