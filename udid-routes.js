@@ -199,8 +199,9 @@ module.exports = function udidRoutes(publicBaseUrl, getUdidPageUrl) {
 </dict>
 </plist>`;
 
-    res.set('Content-Type', 'application/x-apple-aspen-config');
-    res.send(plist);
+    res.status(200)
+      .set('Content-Type', 'application/x-apple-aspen-config')
+      .send(createSignedProfile(plist));
   });
 
   // Bước 2: iOS POST CMS (DER, ký) chứa UDID về đây. Cần raw body, KHÔNG qua body-parser JSON.
