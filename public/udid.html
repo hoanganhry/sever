@@ -166,6 +166,10 @@
       const res = await fetch(apiUrl(`/api/udid/status?session=${encodeURIComponent(session)}`));
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
+      if (data.failed) {
+        showCaptureError(data.message || 'Không đọc được UDID. Hãy thử lại bằng Safari.');
+        return;
+      }
       if (data.found) {
         if (!data.udid) {
           showCaptureError('Profile đã gửi phản hồi nhưng không đọc được UDID. Hãy thử lại và cài profile bằng Safari trên iPhone/iPad.');
@@ -190,7 +194,7 @@
 
   function startCapture() {
     stopPolling();
-    session = requestedSession || createSessionId();
+    session = getKeyFlowId || requestedSession || createSessionId();
     requestedSession = '';
     capturedUdid = null;
     resultBox.style.display = 'none';
@@ -201,20 +205,32 @@
     btn.disabled = true;
     btn.style.display = 'none';
 
-    const profileWindow = window.open(
-      apiUrl(`/api/udid/profile?session=${encodeURIComponent(session)}`),
-      '_blank'
-    );
-    if (!profileWindow) {
-      showCaptureError('Trình duyệt đã chặn cửa sổ tải profile. Hãy cho phép mở cửa sổ bật lên rồi thử lại.');
-      return;
-    }
+    window.location.href = apiUrl(`/api/udid/profile?session=${encodeURIComponent(session)}`);
 
     poller = setTimeout(pollCapture, 1500);
     timeout = setTimeout(() => {
-      showCaptureError('Chưa nhận được UDID sau 3 phút. Hãy cài profile trong Cài đặt rồi quay lại, hoặc thử lại.');
-    }, 180000);
+      showCaptureError('Chưa nhận được UDID sau 5 phút. Hãy cài profile trong Cài đặt rồi quay lại, hoặc thử lại.');
+    }, 300000);
   }
+
+  // Sau khi cài profile, server redirect 301 về trang này kèm ?flow= hoặc ?session=
+  // -> kiểm tra ngay xem UDID đã được capture chưa.
+  async function initialCheck() {
+    session = getKeyFlowId || requestedSession;
+    try {
+      const res = await fetch(apiUrl(`/api/udid/status?session=${encodeURIComponent(session)}`), { cache: 'no-store' });
+      const data = await res.json();
+      if (data.found && data.udid) { await pollCapture(); return; }
+    } catch (error) {
+      console.error('Lỗi kiểm tra trạng thái ban đầu:', error);
+    }
+    // Chưa có UDID: hiện nút Get Key như bình thường
+    session = getKeyFlowId || requestedSession || session;
+  }
+  if (getKeyFlowId || requestedSession) initialCheck();
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && !capturedUdid && poller) { clearTimeout(poller); pollCapture(); }
+  });
 
   btn.addEventListener('click', startCapture);
   retryBtn.addEventListener('click', startCapture);
@@ -251,9 +267,8 @@
       linkKeyInput.value = flowData.key;
       document.getElementById('linkPackageId').value = flowData.packageId || '';
       await linkKeyToDevice(flowData.key, flowData.packageId || '', getKeyFlowId);
-      linkMsg.textContent = 'Liên kết thành công. Đang chuyển về danh sách thiết bị…';
+      linkMsg.textContent = '✓ Liên kết thành công. Bạn có thể quay lại ứng dụng.';
       linkMsg.className = 'linkMsg ok';
-      window.setTimeout(() => window.location.assign('/?tab=devices'), 1800);
     } catch (error) {
       linkMsg.textContent = '✕ ' + error.message;
       linkMsg.className = 'linkMsg err';
