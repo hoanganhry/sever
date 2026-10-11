@@ -13,10 +13,13 @@
 const express = require('express');
 const forge = require('node-forge');
 const { v4: uuidv4 } = require('uuid');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
 const router = express.Router();
+const GET_KEY_FLOW_TTL_MS = 10 * 60 * 1000;
+const getKeyFlows = new Map();
 
 const DB_FILE = path.join(__dirname, 'udid_log.json');
 if (!fs.existsSync(DB_FILE)) fs.writeFileSync(DB_FILE, '[]');
@@ -25,24 +28,89 @@ function loadRecords() {
   try { return JSON.parse(fs.readFileSync(DB_FILE, 'utf8')); }
   catch { return []; }
 }
+
+function mergeDuplicateUdids(records) {
+  const merged = [];
+  const indexByUdid = new Map();
+  records.forEach(record => {
+    if (!record.udid) {
+      merged.push(record);
+      return;
+    }
+    const existingIndex = indexByUdid.get(record.udid);
+    if (existingIndex === undefined) {
+      indexByUdid.set(record.udid, merged.length);
+      merged.push(record);
+      return;
+    }
+    const existing = merged[existingIndex];
+    merged[existingIndex] = {
+      ...existing,
+      ...record,
+      linkedKey: record.linkedKey || existing.linkedKey,
+      linkedAt: record.linkedAt || existing.linkedAt
+    };
+  });
+  return merged;
+}
+
 function saveRecord(record) {
-  const records = loadRecords();
+  let records = mergeDuplicateUdids(loadRecords());
+  if (record.udid) {
+    const previous = [...records].reverse().find(item => item.udid === record.udid);
+    if (previous) {
+      record.linkedKey = previous.linkedKey || record.linkedKey;
+      record.linkedAt = previous.linkedAt || record.linkedAt;
+    }
+    records = records.filter(item => item.udid !== record.udid);
+  }
   records.push(record);
-  fs.writeFileSync(DB_FILE, JSON.stringify(records, null, 2));
+  fs.writeFileSync(DB_FILE, JSON.stringify(mergeDuplicateUdids(records), null, 2));
 }
 function findRecord(session) {
   return loadRecords().find(r => r.session === session);
 }
-function updateRecordByUdid(udid, patch) {
-  const records = loadRecords();
+function updateRecordByUdid(udid, patch, session = null) {
+  const records = mergeDuplicateUdids(loadRecords());
   for (let i = records.length - 1; i >= 0; i--) {
-    if (records[i].udid === udid) {
+    if (records[i].udid === udid && (!session || records[i].session === session)) {
       Object.assign(records[i], patch);
       fs.writeFileSync(DB_FILE, JSON.stringify(records, null, 2));
       return records[i];
     }
   }
   return null;
+}
+
+function linkDeviceToKey(udid, key) {
+  return updateRecordByUdid(udid, { linkedKey: key, linkedAt: new Date().toISOString() });
+}
+
+function pruneGetKeyFlows() {
+  const now = Date.now();
+  for (const [flowId, flow] of getKeyFlows) {
+    if (flow.expiresAt <= now) getKeyFlows.delete(flowId);
+  }
+}
+
+function createGetKeyFlow(key, packageId) {
+  pruneGetKeyFlows();
+  const flowId = crypto.randomBytes(32).toString('hex');
+  getKeyFlows.set(flowId, {
+    key,
+    packageId: packageId || '',
+    expiresAt: Date.now() + GET_KEY_FLOW_TTL_MS
+  });
+  return flowId;
+}
+
+function getGetKeyFlow(flowId) {
+  pruneGetKeyFlows();
+  return getKeyFlows.get(flowId) || null;
+}
+
+function completeGetKeyFlow(flowId) {
+  return getKeyFlows.delete(flowId);
 }
 
 // đơn giản: đọc <key>X</key><string>Y</string> từ plist XML thô, khỏi cần thư viện plist
@@ -52,7 +120,7 @@ function extractPlistString(xml, key) {
   return m ? m[1] : null;
 }
 
-module.exports = function udidRoutes(publicBaseUrl) {
+module.exports = function udidRoutes(publicBaseUrl, getUdidPageUrl) {
 
   // Bước 1: sinh file cấu hình để thiết bị cài
   router.get('/api/udid/profile', (req, res) => {
@@ -171,7 +239,7 @@ module.exports = function udidRoutes(publicBaseUrl) {
       <key>Label</key>
       <string>AuthAPI</string>
       <key>URL</key>
-      <string>${publicBaseUrl}/udid.html</string>
+      <string>${getUdidPageUrl}</string>
       <key>IsRemovable</key>
       <true/>
       <key>FullScreen</key>
@@ -199,7 +267,23 @@ module.exports = function udidRoutes(publicBaseUrl) {
     } catch (err) {
       // trường hợp xấu nhất tuyệt đối không được xảy ra, nhưng nếu có, vẫn phải trả 200
       console.error('UDID callback final response error:', err.message);
-      res.status(200).set('Content-Type', 'application/x-apple-aspen-config').send('<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>PayloadContent</key><array><dict><key>PayloadType</key><string>com.apple.webClip.managed</string><key>PayloadVersion</key><integer>1</integer><key>PayloadIdentifier</key><string>com.authapi.webclip.fallback</string><key>PayloadUUID</key><string>' + uuidv4().toUpperCase() + '</string><key>PayloadDisplayName</key><string>AuthAPI</string><key>Label</key><string>AuthAPI</string><key>URL</key><string>' + publicBaseUrl + '/udid.html</string><key>IsRemovable</key><true/></dict></array><key>PayloadDisplayName</key><string>Hoan tat</string><key>PayloadIdentifier</key><string>com.authapi.complete.fallback</string><key>PayloadType</key><string>Configuration</string><key>PayloadUUID</key><string>' + uuidv4().toUpperCase() + '</string><key>PayloadVersion</key><integer>1</integer></dict></plist>');
+      const fallbackPlist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict><key>PayloadContent</key><array><dict>
+<key>PayloadType</key><string>com.apple.webClip.managed</string>
+<key>PayloadVersion</key><integer>1</integer>
+<key>PayloadIdentifier</key><string>com.authapi.webclip.fallback</string>
+<key>PayloadUUID</key><string>${uuidv4().toUpperCase()}</string>
+<key>PayloadDisplayName</key><string>AuthAPI</string>
+<key>Label</key><string>AuthAPI</string>
+<key>URL</key><string>${getUdidPageUrl}</string>
+<key>IsRemovable</key><true/>
+</dict></array><key>PayloadDisplayName</key><string>Hoan tat</string>
+<key>PayloadIdentifier</key><string>com.authapi.complete.fallback</string>
+<key>PayloadType</key><string>Configuration</string>
+<key>PayloadUUID</key><string>${uuidv4().toUpperCase()}</string>
+<key>PayloadVersion</key><integer>1</integer></dict></plist>`;
+      res.status(200).set('Content-Type', 'application/x-apple-aspen-config').send(fallbackPlist);
     }
   });
 
@@ -221,13 +305,31 @@ module.exports = function udidRoutes(publicBaseUrl) {
     res.json({ success: true, linked: true, key: latest.linkedKey, linkedAt: latest.linkedAt });
   });
 
+  router.get('/api/udid/flow', (req, res) => {
+    const flowId = typeof req.query.session === 'string' ? req.query.session : '';
+    const flow = getGetKeyFlow(flowId);
+    res.set('Cache-Control', 'no-store');
+    if (!flow) {
+      return res.status(404).json({ success: false, message: 'Phiên Get Key không hợp lệ hoặc đã hết hạn. Hãy bắt đầu lại.' });
+    }
+    res.json({
+      success: true,
+      key: flow.key,
+      packageId: flow.packageId,
+      expiresAt: new Date(flow.expiresAt).toISOString()
+    });
+  });
+
   // Danh sách toàn bộ UDID đã lấy được (mới nhất trước), kèm key đã liên kết (nếu có)
   // -> dùng cho trang quản trị index.html, không public trong udid.html
   router.get('/api/udid/list', (req, res) => {
     try {
-      const records = loadRecords()
-        .filter(r => r.udid) // bỏ các lần capture lỗi không có UDID
-        .reverse();
+      const sourceRecords = loadRecords();
+      const mergedRecords = mergeDuplicateUdids(sourceRecords);
+      if (mergedRecords.length !== sourceRecords.length) {
+        fs.writeFileSync(DB_FILE, JSON.stringify(mergedRecords, null, 2));
+      }
+      const records = mergedRecords.filter(r => r.udid).reverse();
       res.json({ success: true, count: records.length, devices: records });
     } catch (err) {
       res.status(500).json({ success: false, message: err.message });
@@ -236,16 +338,32 @@ module.exports = function udidRoutes(publicBaseUrl) {
 
   // Ghi lại UDID này đang dùng key nào (gọi sau khi verify-key ở server chính thành công)
   router.post('/api/udid/link-key', express.json(), (req, res) => {
-    const { udid, key } = req.body || {};
+    const { udid, key, flowId } = req.body || {};
     if (!udid || !key) {
       return res.status(400).json({ success: false, message: 'Thiếu udid hoặc key' });
     }
-    const updated = updateRecordByUdid(udid, { linkedKey: key, linkedAt: new Date().toISOString() });
+    if (flowId) {
+      const flow = getGetKeyFlow(flowId);
+      if (!flow || flow.key !== key) {
+        return res.status(403).json({ success: false, message: 'Phiên Get Key không hợp lệ hoặc đã hết hạn. Hãy bắt đầu lại.' });
+      }
+    }
+    const updated = updateRecordByUdid(
+      udid,
+      { linkedKey: key, linkedAt: new Date().toISOString() },
+      flowId || null
+    );
     if (!updated) {
       return res.status(404).json({ success: false, message: 'Không tìm thấy UDID này trong danh sách đã capture' });
     }
+    if (flowId) completeGetKeyFlow(flowId);
     res.json({ success: true, device: updated });
   });
+
+  router.getDeviceRecords = () => mergeDuplicateUdids(loadRecords()).filter(record => record.udid);
+  router.linkDeviceToKey = linkDeviceToKey;
+  router.createGetKeyFlow = createGetKeyFlow;
+  router.getGetKeyFlow = getGetKeyFlow;
 
   return router;
 };

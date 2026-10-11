@@ -12,11 +12,82 @@ const { v4: uuidv4 } = require('uuid');
 
 const app = express();
 const udidRoutes = require('./udid-routes');
-app.use(udidRoutes('https://sever-0i55.onrender.com')); // domain thật của bạn
+const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || 'https://helo123-6le3.onrender.com').replace(/\/+$/, '');
+const GET_UDID_PAGE_URL = new URL('/get-key', `${PUBLIC_BASE_URL}/`).toString();
+const DASHBOARD_USERNAME = process.env.DASHBOARD_USERNAME || '';
+const DASHBOARD_PASSWORD = process.env.DASHBOARD_PASSWORD || '';
+const DASHBOARD_PROTECTED_PATHS = new Set([
+  '/api',
+  '/api/create-key',
+  '/api/bulk-create-keys',
+  '/api/list-keys',
+  '/api/my-stats',
+  '/api/my-api-code',
+  '/api/reset-api-code',
+  '/api/extend-key',
+  '/api/reset-key',
+  '/api/delete-key',
+  '/api/delete-keys',
+  '/api/delete-expired-keys',
+  '/api/udid/list'
+]);
+
+function requiresDashboardAuth(req) {
+  let requestPath;
+  try {
+    requestPath = decodeURIComponent(req.path).toLowerCase().replace(/\/+$/, '') || '/';
+  } catch {
+    return true;
+  }
+  if (['GET', 'HEAD'].includes(req.method) && ['/', '/index.html'].includes(requestPath)) return true;
+  if (requestPath === '/api/admin' || requestPath.startsWith('/api/admin/')) return true;
+  return DASHBOARD_PROTECTED_PATHS.has(requestPath);
+}
+
+function constantTimeEquals(left, right) {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+  return leftBuffer.length === rightBuffer.length && crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function dashboardPasswordAuth(req, res, next) {
+  if (!requiresDashboardAuth(req)) return next();
+  if (!DASHBOARD_USERNAME || !DASHBOARD_PASSWORD) {
+    res.set('Cache-Control', 'no-store');
+    if (req.path.toLowerCase().startsWith('/api/')) {
+      return res.status(503).json({ success: false, message: 'Đăng nhập quản trị chưa được cấu hình trên máy chủ.' });
+    }
+    return res.status(503).send('Dashboard is locked. Configure DASHBOARD_USERNAME and DASHBOARD_PASSWORD on the server.');
+  }
+
+  const authorization = req.get('authorization') || '';
+  const encodedCredentials = authorization.match(/^Basic\s+([A-Za-z0-9+/]+={0,2})$/i)?.[1];
+  if (encodedCredentials) {
+    const credentials = Buffer.from(encodedCredentials, 'base64').toString('utf8');
+    const separator = credentials.indexOf(':');
+    const username = separator >= 0 ? credentials.slice(0, separator) : '';
+    const password = separator >= 0 ? credentials.slice(separator + 1) : '';
+    const usernameMatches = constantTimeEquals(username, DASHBOARD_USERNAME);
+    const passwordMatches = constantTimeEquals(password, DASHBOARD_PASSWORD);
+    if (usernameMatches && passwordMatches) return next();
+  }
+
+  res.set('Cache-Control', 'no-store');
+  res.set('WWW-Authenticate', 'Basic realm="APIServer Dashboard", charset="UTF-8"');
+  if (req.path.toLowerCase().startsWith('/api/')) {
+    return res.status(401).json({ success: false, message: 'Cần đăng nhập quản trị để truy cập.' });
+  }
+  res.status(401).send('Tên đăng nhập hoặc mật khẩu quản trị không đúng.');
+}
+
+const udidRouter = udidRoutes(PUBLIC_BASE_URL, GET_UDID_PAGE_URL);
+app.use(dashboardPasswordAuth);
+app.use(udidRouter);
 /* ================= CONSTANTS ================= */
 const PORT = process.env.PORT || 10000;
 const DATA_DIR = process.env.DATA_DIR || __dirname;
 const DATA_FILE = path.join(DATA_DIR, 'keys.json');
+const PACKAGES_FILE = path.join(DATA_DIR, 'packages.json');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 const DEVICES_FILE = path.join(DATA_DIR, 'devices.json');
@@ -29,8 +100,8 @@ const JWT_SECRET = process.env.JWT_SECRET || 'please-change-jwt-secret-2025';
 const HMAC_SECRET = process.env.HMAC_SECRET || 'please-change-hmac-secret-2025';
 
 // AI API Keys (set in environment variables)
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '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';
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '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';
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
 
 const MAX_ACCOUNTS_PER_DEVICE = 3;
 const MAX_MEMORY_MB = 450;
@@ -96,6 +167,19 @@ app.use((err, req, res, next) => {
 app.use(cors());
 app.use(bodyParser.json({ limit: '10mb' }));
 app.use(express.static('public'));
+app.get(['/get-key', '/udid.html'], (req, res) => {
+  if (req.path === '/udid.html') {
+    const query = new URLSearchParams();
+    for (const name of ['flow', 'packageId', 'session']) {
+      if (typeof req.query[name] === 'string' && req.query[name]) {
+        query.set(name, req.query[name]);
+      }
+    }
+    const suffix = query.size ? `?${query.toString()}` : '';
+    return res.redirect(302, `/get-key${suffix}`);
+  }
+  res.sendFile(path.join(__dirname, 'edgeone-getudid', 'index.html'));
+});
 
 app.use((req, res, next) => {
   const startTime = Date.now();
@@ -314,6 +398,11 @@ async function initializeFiles() {
     if (!fsSync.existsSync(DATA_FILE)) {
       await safeSaveJSON(DATA_FILE, []);
       console.log('✅ Initialized keys.json');
+    }
+
+    if (!fsSync.existsSync(PACKAGES_FILE)) {
+      await safeSaveJSON(PACKAGES_FILE, []);
+      console.log('✅ Initialized packages.json');
     }
 
     if (!fsSync.existsSync(USERS_FILE)) {
@@ -913,16 +1002,24 @@ app.get('/api/admin/ai-logs', requireAdmin, async (req, res) => {
 /* ================= CREATE KEY ================= */
 app.post('/api/create-key', async (req, res) => {
   try {
-    const { days, devices, type, customKey } = req.body || {};
-    
-    if (!days || !devices) {
+    const { duration = req.body?.days, durationUnit = 'day', timezoneOffset = 0, devices, type, customKey, packageId } = req.body || {};
+    const amount = Number(duration);
+    const isPermanent = durationUnit === 'permanent';
+    const expiration = isPermanent ? null : getKeyExpiration(amount, durationUnit, timezoneOffset);
+
+    if ((!isPermanent && !expiration) || !Number.isFinite(Number(devices)) || Number(devices) < 1 ||
+        typeof packageId !== 'string' || !packageId.trim()) {
       return res.status(400).json({ success: false, message: 'Vui lòng nhập đầy đủ thông tin' });
+    }
+
+    const appPackage = (await loadPackages()).find(item => item.id === packageId.trim() && item.enabled);
+    if (!appPackage) {
+      return res.status(400).json({ success: false, message: 'Vui lòng chọn một gói ứng dụng đang bật' });
     }
 
     const config = await loadConfig();
     const maxDays = config.settings?.max_key_days || 365;
-    
-    if (days > maxDays) {
+    if (expiration && exceedsKeyLifetimeLimit(expiration, maxDays, amount, durationUnit)) {
       return res.status(400).json({ 
         success: false, 
         message: `Thời hạn tối đa ${maxDays} ngày` 
@@ -945,7 +1042,7 @@ app.post('/api/create-key', async (req, res) => {
     }
 
     const createdAt = new Date().toISOString();
-    const expiresAt = new Date(Date.now() + days * 86400000).toISOString();
+    const expiresAt = expiration?.toISOString() ?? null;
     const signature = signValue(keyCode);
 
     const keys = await loadKeys();
@@ -956,6 +1053,8 @@ app.post('/api/create-key', async (req, res) => {
       signature,
       created_at: createdAt,
       expires_at: expiresAt,
+      is_permanent: isPermanent,
+      is_disabled: false,
       allowed_devices: Number(devices),
       devices: [],
       owner_id: 'public',
@@ -963,7 +1062,8 @@ app.post('/api/create-key', async (req, res) => {
       require_api_key: false,
       total_verifications: 0,
       last_verified: null,
-      is_custom: !!customKey
+      is_custom: !!customKey,
+      package_id: appPackage.id
     };
 
     keys.push(record);
@@ -972,7 +1072,9 @@ app.post('/api/create-key', async (req, res) => {
     await logActivity('create_key', 'public', 'public', { 
       keyCode, 
       type, 
-      days, 
+      duration: amount,
+      durationUnit,
+      packageId: appPackage.id,
       devices,
       custom: !!customKey 
     });
@@ -986,13 +1088,29 @@ app.post('/api/create-key', async (req, res) => {
 
 app.post('/api/bulk-create-keys', async (req, res) => {
   try {
-    const { count, days, devices, type } = req.body || {};
-    
-    if (!count || !days || !devices || count < 1 || count > 100) {
+    const { count, duration = req.body?.days, durationUnit = 'day', timezoneOffset = 0, devices, type, packageId } = req.body || {};
+    const amount = Number(duration);
+    const isPermanent = durationUnit === 'permanent';
+    const expiration = isPermanent ? null : getKeyExpiration(amount, durationUnit, timezoneOffset);
+
+    if (!Number.isInteger(Number(count)) || count < 1 || count > 100 || (!isPermanent && !expiration) ||
+        !Number.isFinite(Number(devices)) || Number(devices) < 1 ||
+        typeof packageId !== 'string' || !packageId.trim()) {
       return res.status(400).json({ 
         success: false, 
-        message: 'Số lượng phải từ 1-100' 
+        message: 'Vui lòng kiểm tra số lượng (1–100), thời hạn và số thiết bị' 
       });
+    }
+
+    const appPackage = (await loadPackages()).find(item => item.id === packageId.trim() && item.enabled);
+    if (!appPackage) {
+      return res.status(400).json({ success: false, message: 'Vui lòng chọn một gói ứng dụng đang bật' });
+    }
+
+    const config = await loadConfig();
+    const maxDays = config.settings?.max_key_days || 365;
+    if (expiration && exceedsKeyLifetimeLimit(expiration, maxDays, amount, durationUnit)) {
+      return res.status(400).json({ success: false, message: `Thời hạn tối đa ${maxDays} ngày` });
     }
 
     const keys = await loadKeys();
@@ -1001,7 +1119,7 @@ app.post('/api/bulk-create-keys', async (req, res) => {
     for (let i = 0; i < count; i++) {
       const keyCode = generateKey(type || "KEY");
       const createdAt = new Date().toISOString();
-      const expiresAt = new Date(Date.now() + days * 86400000).toISOString();
+      const expiresAt = expiration?.toISOString() ?? null;
       const signature = signValue(keyCode);
 
       const record = {
@@ -1011,13 +1129,16 @@ app.post('/api/bulk-create-keys', async (req, res) => {
         signature,
         created_at: createdAt,
         expires_at: expiresAt,
+        is_permanent: isPermanent,
+        is_disabled: false,
         allowed_devices: Number(devices),
         devices: [],
         owner_id: 'public',
         owner_username: 'public',
         require_api_key: false,
         total_verifications: 0,
-        last_verified: null
+        last_verified: null,
+        package_id: appPackage.id
       };
 
       keys.push(record);
@@ -1029,7 +1150,9 @@ app.post('/api/bulk-create-keys', async (req, res) => {
     await logActivity('bulk_create_keys', 'public', 'public', { 
       count, 
       type, 
-      days, 
+      duration: amount,
+      durationUnit,
+      packageId: appPackage.id,
       devices 
     });
 
@@ -1046,10 +1169,84 @@ app.post('/api/bulk-create-keys', async (req, res) => {
 
 app.get('/api/list-keys', async (req, res) => {
   try {
-    res.json(await loadKeys());
+    const deviceRecords = udidRouter.getDeviceRecords();
+    const deviceDetailsByUdid = new Map();
+    deviceRecords.forEach(record => {
+      deviceDetailsByUdid.set(record.udid, {
+        udid: record.udid,
+        product: record.product || null,
+        version: record.version || null,
+        capturedAt: record.capturedAt || null,
+        linkedKey: record.linkedKey || null,
+        linkedAt: record.linkedAt || null
+      });
+    });
+    const keys = await loadKeys();
+    res.json(keys.map(key => {
+      const devices = [...new Set((Array.isArray(key.devices) ? key.devices : [])
+        .filter(udid => typeof udid === 'string' && udid.trim()))];
+      return {
+        ...key,
+        devices,
+        device_info: devices.map(udid =>
+          deviceDetailsByUdid.get(udid) || { udid, product: null, version: null, capturedAt: null }
+        )
+      };
+    }));
   } catch(err) {
     console.error('List all keys error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+app.post('/api/udid/start', async (req, res) => {
+  try {
+    const { key, packageId } = req.body || {};
+    if (typeof key !== 'string' || !key.trim() ||
+        (packageId !== undefined && typeof packageId !== 'string')) {
+      return res.status(400).json({ success: false, message: 'Vui lòng nhập key hợp lệ.' });
+    }
+
+    const normalizedKey = key.trim();
+    const normalizedPackageId = typeof packageId === 'string' ? packageId.trim() : '';
+    const license = (await loadKeys()).find(item => item.key_code === normalizedKey);
+    if (!license) {
+      return res.status(404).json({ success: false, message: 'Key không tồn tại.' });
+    }
+    if (isKeyDisabled(license)) {
+      return res.status(403).json({ success: false, message: 'Key đã bị vô hiệu hóa.' });
+    }
+    if (license.package_id || normalizedPackageId) {
+      if (!normalizedPackageId || license.package_id !== normalizedPackageId) {
+        return res.status(403).json({ success: false, message: 'Key không được gán cho gói ứng dụng này.' });
+      }
+      const appPackage = (await loadPackages()).find(item => item.id === normalizedPackageId);
+      if (!appPackage || !appPackage.enabled) {
+        return res.status(403).json({
+          success: false,
+          message: appPackage?.message || 'Gói ứng dụng đã bị tắt.',
+          updateUrl: appPackage?.updateUrl || null
+        });
+      }
+    }
+    if (isKeyExpired(license)) {
+      return res.status(403).json({ success: false, message: 'Key đã hết hạn.' });
+    }
+
+    const flowId = udidRouter.createGetKeyFlow(normalizedKey, normalizedPackageId);
+    const query = new URLSearchParams({ flow: flowId });
+    if (normalizedPackageId) query.set('packageId', normalizedPackageId);
+    const registrationUrl = new URL(`/get-key?${query.toString()}`, `${PUBLIC_BASE_URL}/`);
+    res.set('Cache-Control', 'no-store');
+    res.status(201).json({
+      success: true,
+      flowId,
+      registrationUrl: registrationUrl.toString(),
+      expiresInSeconds: 600
+    });
+  } catch (err) {
+    console.error('Start Get Key flow error:', err);
+    res.status(500).json({ success: false, message: 'Không thể bắt đầu Get Key. Vui lòng thử lại.' });
   }
 });
 
@@ -1060,8 +1257,8 @@ app.get('/api/my-stats', async (req, res) => {
 
     const stats = {
       totalKeys: keys.length,
-      activeKeys: keys.filter(k => new Date(k.expires_at) > now).length,
-      expiredKeys: keys.filter(k => new Date(k.expires_at) <= now).length,
+      activeKeys: keys.filter(k => !isKeyDisabled(k) && !isKeyExpired(k, now.getTime())).length,
+      expiredKeys: keys.filter(k => isKeyExpired(k, now.getTime())).length,
       keyLimit: 'Không giới hạn',
       keysRemaining: 'Không giới hạn',
       totalKeysCreated: keys.length,
@@ -1093,6 +1290,420 @@ app.post('/api/reset-api-code', async (req, res) => {
   });
 });
 
+function loadPackages() {
+  return safeLoadJSON(PACKAGES_FILE, []);
+}
+
+function savePackages(packages) {
+  return safeSaveJSON(PACKAGES_FILE, packages);
+}
+
+app.get('/api/app/packages/:packageId', async (req, res) => {
+  try {
+    const packages = await loadPackages();
+    const appPackage = packages.find(item => item.id === req.params.packageId);
+    if (!appPackage) {
+      return res.status(404).json({ success: false, enabled: false, message: 'App package not found' });
+    }
+    res.json({
+      success: true,
+      packageId: appPackage.id,
+      enabled: appPackage.enabled,
+      message: appPackage.message || '',
+      updateUrl: appPackage.updateUrl || null
+    });
+  } catch (err) {
+    console.error('Get app package status error:', err);
+    res.status(500).json({ success: false, message: 'Unable to read package status' });
+  }
+});
+
+app.get('/api/app/packages', async (req, res) => {
+  try {
+    const packages = await loadPackages();
+    res.json({
+      success: true,
+      packages: packages
+        .filter(appPackage => appPackage.enabled)
+        .map(({ id, name }) => ({ id, name }))
+    });
+  } catch (err) {
+    console.error('List enabled app packages error:', err);
+    res.status(500).json({ success: false, message: 'Unable to load app packages' });
+  }
+});
+
+app.post('/api/app/check-package', async (req, res) => {
+  try {
+    const { packageId, key } = req.body || {};
+    if (typeof packageId !== 'string' || !packageId.trim() ||
+        typeof key !== 'string' || !key.trim()) {
+      return res.status(400).json({ success: false, allowed: false, message: 'packageId and key are required' });
+    }
+
+    const appPackage = (await loadPackages()).find(item => item.id === packageId.trim());
+    if (!appPackage || !appPackage.enabled) {
+      return res.json({
+        success: true,
+        allowed: false,
+        code: 'PACKAGE_DISABLED',
+        message: appPackage?.message || 'This app version is no longer available. Please install the latest version.',
+        updateUrl: appPackage?.updateUrl || null
+      });
+    }
+
+    const license = (await loadKeys()).find(item => item.key_code === key.trim());
+    if (!license || license.package_id !== appPackage.id) {
+      return res.json({
+        success: true,
+        allowed: false,
+        code: 'KEY_NOT_ASSIGNED_TO_PACKAGE',
+        message: 'This key is not assigned to this app package.'
+      });
+    }
+    if (isKeyDisabled(license)) {
+      return res.json({
+        success: true,
+        allowed: false,
+        code: 'KEY_DISABLED',
+        message: 'This key has been disabled.'
+      });
+    }
+    if (signValue(license.key_code) !== license.signature) {
+      return res.json({
+        success: true,
+        allowed: false,
+        code: 'SIGNATURE_MISMATCH',
+        message: 'This key failed validation.'
+      });
+    }
+    if (isKeyExpired(license)) {
+      return res.json({
+        success: true,
+        allowed: false,
+        code: 'KEY_EXPIRED',
+        message: 'This key has expired.'
+      });
+    }
+
+    res.json({
+      success: true,
+      allowed: true,
+      code: 'OK',
+      packageId: appPackage.id,
+      message: appPackage.message || '',
+      updateUrl: appPackage.updateUrl || null,
+      expiresAt: license.expires_at,
+      isPermanent: isPermanentKey(license)
+    });
+  } catch (err) {
+    console.error('Check app package error:', err);
+    res.status(500).json({ success: false, allowed: false, message: 'Unable to check app package' });
+  }
+});
+
+app.get('/api/admin/packages', async (req, res) => {
+  try {
+    const [packages, keys] = await Promise.all([loadPackages(), loadKeys()]);
+    res.json({
+      success: true,
+      packages: packages.map(appPackage => ({
+        ...appPackage,
+        assignedKeys: keys.filter(key => key.package_id === appPackage.id).map(key => key.key_code)
+      }))
+    });
+  } catch (err) {
+    console.error('List app packages error:', err);
+    res.status(500).json({ success: false, message: 'Unable to load app packages' });
+  }
+});
+
+app.post('/api/admin/packages', async (req, res) => {
+  try {
+    const { id, name, message = '', updateUrl = '' } = req.body || {};
+    const packageId = typeof id === 'string' ? id.trim() : '';
+    const packageName = typeof name === 'string' ? name.trim() : '';
+    const packageMessage = typeof message === 'string' ? message.trim() : null;
+    const packageUpdateUrl = typeof updateUrl === 'string' ? updateUrl.trim() : null;
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(packageId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Mã package phải dài 1–64 ký tự, bắt đầu bằng chữ hoặc số và chỉ dùng chữ, số, dấu chấm, gạch ngang hoặc gạch dưới.'
+      });
+    }
+    if (!packageName || packageName.length > 80) {
+      return res.status(400).json({ success: false, message: 'Tên package phải có từ 1–80 ký tự.' });
+    }
+    if (packageMessage === null || packageMessage.length > 500) {
+      return res.status(400).json({ success: false, message: 'Tin nhắn package tối đa 500 ký tự.' });
+    }
+    if (packageUpdateUrl === null || packageUpdateUrl.length > 2048) {
+      return res.status(400).json({ success: false, message: 'Link cập nhật tối đa 2048 ký tự.' });
+    }
+    if (packageUpdateUrl && !/^https?:\/\/\S+$/i.test(packageUpdateUrl)) {
+      return res.status(400).json({ success: false, message: 'Link cập nhật phải bắt đầu bằng http:// hoặc https://.' });
+    }
+
+    const packages = await loadPackages();
+    if (packages.some(item => item.id.toLowerCase() === packageId.toLowerCase())) {
+      return res.status(409).json({ success: false, message: 'Package ID already exists' });
+    }
+    const appPackage = {
+      id: packageId,
+      name: packageName,
+      enabled: true,
+      message: packageMessage,
+      updateUrl: packageUpdateUrl,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+    packages.push(appPackage);
+    if (!await savePackages(packages)) {
+      return res.status(500).json({ success: false, message: 'Unable to save app package' });
+    }
+    await logActivity('create_app_package', 'admin', 'admin', { packageId });
+    res.status(201).json({ success: true, package: appPackage });
+  } catch (err) {
+    console.error('Create app package error:', err);
+    res.status(500).json({ success: false, message: 'Unable to create app package' });
+  }
+});
+
+app.patch('/api/admin/packages/:packageId', async (req, res) => {
+  try {
+    const packages = await loadPackages();
+    const appPackage = packages.find(item => item.id === req.params.packageId);
+    if (!appPackage) return res.status(404).json({ success: false, message: 'App package not found' });
+
+    const { enabled, message, updateUrl, name } = req.body || {};
+    if (enabled !== undefined && typeof enabled !== 'boolean') {
+      return res.status(400).json({ success: false, message: 'enabled must be a boolean' });
+    }
+    if (message !== undefined && (typeof message !== 'string' || message.length > 500)) {
+      return res.status(400).json({ success: false, message: 'Message must be 500 characters or fewer' });
+    }
+    if (updateUrl !== undefined &&
+        (typeof updateUrl !== 'string' || updateUrl.length > 2048 ||
+         (updateUrl && !/^https?:\/\/\S+$/i.test(updateUrl)))) {
+      return res.status(400).json({ success: false, message: 'Update URL must use http or https' });
+    }
+    if (name !== undefined && (typeof name !== 'string' || !name.trim() || name.trim().length > 80)) {
+      return res.status(400).json({ success: false, message: 'Name must be 1–80 characters' });
+    }
+
+    if (enabled !== undefined) appPackage.enabled = enabled;
+    if (message !== undefined) appPackage.message = message.trim();
+    if (updateUrl !== undefined) appPackage.updateUrl = updateUrl.trim();
+    if (name !== undefined) appPackage.name = name.trim();
+    appPackage.updated_at = new Date().toISOString();
+    if (!await savePackages(packages)) {
+      return res.status(500).json({ success: false, message: 'Unable to save app package' });
+    }
+    await logActivity('update_app_package', 'admin', 'admin', { packageId: appPackage.id, enabled: appPackage.enabled });
+    res.json({ success: true, package: appPackage });
+  } catch (err) {
+    console.error('Update app package error:', err);
+    res.status(500).json({ success: false, message: 'Unable to update app package' });
+  }
+});
+
+app.post('/api/admin/packages/:packageId/keys', async (req, res) => {
+  try {
+    const packageId = req.params.packageId;
+    const { key, remove = false } = req.body || {};
+    if (typeof key !== 'string' || !key.trim() || typeof remove !== 'boolean') {
+      return res.status(400).json({ success: false, message: 'A key and boolean remove flag are required' });
+    }
+    const appPackage = (await loadPackages()).find(item => item.id === packageId);
+    if (!appPackage) return res.status(404).json({ success: false, message: 'App package not found' });
+
+    const keys = await loadKeys();
+    const license = keys.find(item => item.key_code === key.trim());
+    if (!license) return res.status(404).json({ success: false, message: 'Key not found' });
+    if (remove) {
+      if (license.package_id === packageId) delete license.package_id;
+    } else {
+      license.package_id = packageId;
+    }
+    if (!await saveKeys(keys)) {
+      return res.status(500).json({ success: false, message: 'Unable to save key assignment' });
+    }
+    await logActivity(remove ? 'unassign_package_key' : 'assign_package_key', 'admin', 'admin', {
+      packageId,
+      keyCode: license.key_code
+    });
+    res.json({ success: true, packageId, key: license.key_code, assigned: !remove });
+  } catch (err) {
+    console.error('Assign package key error:', err);
+    res.status(500).json({ success: false, message: 'Unable to update key assignment' });
+  }
+});
+
+function getKeyExpiration(duration, unit, timezoneOffset = 0, now = new Date()) {
+  const amount = Number(duration);
+  if (!Number.isFinite(amount) || amount <= 0 ||
+      (['month', 'year', 'today'].includes(unit) && !Number.isInteger(amount))) return null;
+
+  const expiresAt = new Date(now);
+  switch (unit) {
+    case 'hour':
+      expiresAt.setTime(now.getTime() + amount * 60 * 60 * 1000);
+      break;
+    case 'day':
+      expiresAt.setTime(now.getTime() + amount * 24 * 60 * 60 * 1000);
+      break;
+    case 'week':
+      expiresAt.setTime(now.getTime() + amount * 7 * 24 * 60 * 60 * 1000);
+      break;
+    case 'month': {
+      const day = expiresAt.getDate();
+      expiresAt.setDate(1);
+      expiresAt.setMonth(expiresAt.getMonth() + amount);
+      const lastDay = new Date(expiresAt.getFullYear(), expiresAt.getMonth() + 1, 0).getDate();
+      expiresAt.setDate(Math.min(day, lastDay));
+      break;
+    }
+    case 'year': {
+      const month = expiresAt.getMonth();
+      const day = expiresAt.getDate();
+      expiresAt.setDate(1);
+      expiresAt.setFullYear(expiresAt.getFullYear() + amount);
+      expiresAt.setMonth(month);
+      const lastDay = new Date(expiresAt.getFullYear(), month + 1, 0).getDate();
+      expiresAt.setDate(Math.min(day, lastDay));
+      break;
+    }
+    case 'today': {
+      const offset = Number(timezoneOffset);
+      if (!Number.isInteger(offset) || offset < -840 || offset > 720) return null;
+      const localNow = new Date(now.getTime() - offset * 60 * 1000);
+      expiresAt.setTime(Date.UTC(
+        localNow.getUTCFullYear(),
+        localNow.getUTCMonth(),
+        localNow.getUTCDate() + 1
+      ) + offset * 60 * 1000 - 1);
+      break;
+    }
+    default:
+      return null;
+  }
+  return expiresAt;
+}
+
+function exceedsKeyLifetimeLimit(expiration, maxDays, duration, unit) {
+  if (expiration.getTime() - Date.now() <= maxDays * 86400000) return false;
+  const isOneCalendarYear = maxDays >= 365 &&
+    ((unit === 'year' && duration === 1) || (unit === 'month' && duration === 12));
+  return !isOneCalendarYear;
+}
+
+function isPermanentKey(key) {
+  return key?.is_permanent === true;
+}
+
+function isKeyDisabled(key) {
+  return key?.is_disabled === true;
+}
+
+function isKeyExpired(key, now = Date.now()) {
+  if (isPermanentKey(key)) return false;
+  const expiresAt = new Date(key?.expires_at).getTime();
+  return !Number.isFinite(expiresAt) || expiresAt <= now;
+}
+
+app.patch('/api/admin/keys/:keyCode', async (req, res) => {
+  try {
+    const keyCode = typeof req.params.keyCode === 'string' ? req.params.keyCode.trim() : '';
+    const keys = await loadKeys();
+    const found = keys.find(key => key.key_code === keyCode);
+    if (!found) return res.status(404).json({ success: false, message: 'Không tìm thấy key' });
+
+    const body = req.body || {};
+    const has = field => Object.prototype.hasOwnProperty.call(body, field);
+    const updatedFields = [];
+
+    if (has('is_disabled')) {
+      if (typeof body.is_disabled !== 'boolean') {
+        return res.status(400).json({ success: false, message: 'is_disabled phải là true hoặc false' });
+      }
+      found.is_disabled = body.is_disabled;
+      updatedFields.push('is_disabled');
+    }
+
+    if (has('type')) {
+      const type = typeof body.type === 'string' ? body.type.trim() : '';
+      if (!type || type.length > 40) {
+        return res.status(400).json({ success: false, message: 'Loại key phải có từ 1 đến 40 ký tự' });
+      }
+      found.type = type;
+      updatedFields.push('type');
+    }
+
+    if (has('packageId')) {
+      if (typeof body.packageId !== 'string') {
+        return res.status(400).json({ success: false, message: 'packageId phải là chuỗi' });
+      }
+      const packageId = body.packageId.trim();
+      if (packageId && packageId !== found.package_id) {
+        const appPackage = (await loadPackages()).find(item => item.id === packageId && item.enabled);
+        if (!appPackage) {
+          return res.status(400).json({ success: false, message: 'Vui lòng chọn một gói ứng dụng đang bật' });
+        }
+      }
+      if (packageId) found.package_id = packageId;
+      else delete found.package_id;
+      updatedFields.push('package_id');
+    }
+
+    if (has('allowed_devices')) {
+      const devices = Number(body.allowed_devices);
+      const usedDevices = Array.isArray(found.devices) ? found.devices.length : 0;
+      if (!Number.isInteger(devices) || devices < 1 || devices < usedDevices) {
+        return res.status(400).json({
+          success: false,
+          message: `Số thiết bị tối đa phải là số nguyên từ ${Math.max(1, usedDevices)} trở lên`
+        });
+      }
+      found.allowed_devices = devices;
+      updatedFields.push('allowed_devices');
+    }
+
+    if (has('expiresAt')) {
+      if (body.expiresAt === null) {
+        found.is_permanent = true;
+        found.expires_at = null;
+      } else {
+        const expiresAt = typeof body.expiresAt === 'string' ? new Date(body.expiresAt) : null;
+        if (!expiresAt || !Number.isFinite(expiresAt.getTime()) || expiresAt.getTime() <= Date.now()) {
+          return res.status(400).json({ success: false, message: 'Ngày hết hạn phải nằm trong tương lai' });
+        }
+        const config = await loadConfig();
+        const maxDays = config.settings?.max_key_days || 365;
+        const durationDays = (expiresAt.getTime() - Date.now()) / 86400000;
+        if (durationDays > maxDays && !(maxDays >= 365 && durationDays <= 366)) {
+          return res.status(400).json({ success: false, message: `Thời hạn tối đa ${maxDays} ngày` });
+        }
+        found.is_permanent = false;
+        found.expires_at = expiresAt.toISOString();
+      }
+      updatedFields.push('expires_at');
+    }
+
+    if (updatedFields.length === 0) {
+      return res.status(400).json({ success: false, message: 'Không có thông tin key nào cần cập nhật' });
+    }
+    if (!await saveKeys(keys)) {
+      return res.status(500).json({ success: false, message: 'Không thể lưu thay đổi key' });
+    }
+
+    await logActivity('update_key', 'public', 'public', { keyCode, fields: updatedFields });
+    res.json({ success: true, message: 'Cập nhật key thành công', key: found });
+  } catch (err) {
+    console.error('Update key error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 app.post('/api/extend-key', async (req, res) => {
   try {
     const { key, days } = req.body || {};
@@ -1101,6 +1712,10 @@ app.post('/api/extend-key', async (req, res) => {
     
     if (!found) {
       return res.status(404).json({ success: false, message: 'Không tìm thấy key' });
+    }
+
+    if (isPermanentKey(found)) {
+      return res.json({ success: true, message: 'Key này đã có thời hạn vĩnh viễn' });
     }
 
     found.expires_at = new Date(
@@ -1175,10 +1790,103 @@ app.post('/api/delete-key', async (req, res) => {
   }
 });
 
+app.post('/api/delete-keys', async (req, res) => {
+  try {
+    const requestedKeys = req.body && req.body.keys;
+    if (!Array.isArray(requestedKeys) || requestedKeys.length === 0) {
+      return res.status(400).json({ success: false, message: 'Chọn ít nhất một key để xóa' });
+    }
+
+    const keyCodes = [...new Set(requestedKeys.filter(key => typeof key === 'string' && key.trim()).map(key => key.trim()))];
+    if (keyCodes.length === 0) {
+      return res.status(400).json({ success: false, message: 'Danh sách key không hợp lệ' });
+    }
+
+    let keys = await loadKeys();
+    const selected = keys.filter(key => keyCodes.includes(key.key_code));
+    const removedCodes = selected.map(key => key.key_code);
+    if (removedCodes.length === 0) {
+      return res.status(404).json({ success: false, message: 'Không tìm thấy key cần xóa' });
+    }
+
+    keys = keys.filter(key => !removedCodes.includes(key.key_code));
+    await saveKeys(keys);
+
+    const ownerCounts = new Map();
+    selected.forEach(key => {
+      if (key.owner_id && key.owner_id !== 'admin') {
+        ownerCounts.set(key.owner_id, (ownerCounts.get(key.owner_id) || 0) + 1);
+      }
+    });
+    if (ownerCounts.size) {
+      const users = await loadUsers();
+      let usersChanged = false;
+      users.forEach(user => {
+        const removedCount = ownerCounts.get(user.id) || 0;
+        if (removedCount && user.keyCount > 0) {
+          user.keyCount = Math.max(0, user.keyCount - removedCount);
+          usersChanged = true;
+        }
+      });
+      if (usersChanged) await saveUsers(users);
+    }
+
+    await logActivity('bulk_delete_keys', 'public', 'public', { keyCodes: removedCodes });
+    res.json({ success: true, deleted: removedCodes.length, keys: removedCodes });
+  } catch (err) {
+    console.error('Bulk delete keys error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+app.post('/api/delete-expired-keys', async (req, res) => {
+  try {
+    let keys = await loadKeys();
+    const now = Date.now();
+    const expired = keys.filter(key =>
+      !isPermanentKey(key) && isKeyExpired(key, now)
+    );
+    if (expired.length === 0) {
+      return res.json({ success: true, deleted: 0, keys: [] });
+    }
+
+    const expiredCodes = expired.map(key => key.key_code);
+    keys = keys.filter(key => !expiredCodes.includes(key.key_code));
+    await saveKeys(keys);
+
+    const ownerCounts = new Map();
+    expired.forEach(key => {
+      if (key.owner_id && key.owner_id !== 'admin') {
+        ownerCounts.set(key.owner_id, (ownerCounts.get(key.owner_id) || 0) + 1);
+      }
+    });
+    if (ownerCounts.size) {
+      const users = await loadUsers();
+      let usersChanged = false;
+      users.forEach(user => {
+        const removedCount = ownerCounts.get(user.id) || 0;
+        if (removedCount && user.keyCount > 0) {
+          user.keyCount = Math.max(0, user.keyCount - removedCount);
+          usersChanged = true;
+        }
+      });
+      if (usersChanged) await saveUsers(users);
+    }
+
+    await logActivity('delete_expired_keys', 'public', 'public', { keyCodes: expiredCodes });
+    res.json({ success: true, deleted: expired.length, keys: expiredCodes });
+  } catch (err) {
+    console.error('Delete expired keys error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 app.post('/api/verify-key', async (req, res) => {
   try {
-    const { key, device_id } = req.body || {};
-    
+    const { key: submittedKey, device_id: submittedDeviceId, packageId } = req.body || {};
+    const key = typeof submittedKey === 'string' ? submittedKey.trim() : '';
+    const device_id = typeof submittedDeviceId === 'string' ? submittedDeviceId.trim() : '';
+
     if (!key || !device_id) {
       return res.status(400).json({ 
         success: false, 
@@ -1198,6 +1906,33 @@ app.post('/api/verify-key', async (req, res) => {
       });
     }
 
+    if (isKeyDisabled(found)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Key đã bị vô hiệu hóa',
+        error_code: 'KEY_DISABLED'
+      });
+    }
+
+    if (found.package_id || packageId) {
+      if (typeof packageId !== 'string' || found.package_id !== packageId) {
+        return res.status(403).json({
+          success: false,
+          message: 'Key không được gán cho gói ứng dụng này',
+          error_code: 'KEY_NOT_ASSIGNED_TO_PACKAGE'
+        });
+      }
+      const appPackage = (await loadPackages()).find(item => item.id === packageId);
+      if (!appPackage || !appPackage.enabled) {
+        return res.status(403).json({
+          success: false,
+          message: appPackage?.message || 'Phiên bản ứng dụng này đã bị tắt. Vui lòng cập nhật ứng dụng.',
+          update_url: appPackage?.updateUrl || null,
+          error_code: 'PACKAGE_DISABLED'
+        });
+      }
+    }
+
     const expectedSig = signValue(found.key_code);
     if (expectedSig !== found.signature) {
       return res.status(500).json({ 
@@ -1207,7 +1942,7 @@ app.post('/api/verify-key', async (req, res) => {
       });
     }
 
-    if (new Date(found.expires_at) < new Date()) {
+    if (isKeyExpired(found)) {
       return res.json({ 
         success: false, 
         message: 'Key đã hết hạn',
@@ -1216,6 +1951,8 @@ app.post('/api/verify-key', async (req, res) => {
       });
     }
 
+    found.devices = [...new Set((Array.isArray(found.devices) ? found.devices : [])
+      .filter(id => typeof id === 'string' && id.trim()))];
     if (!found.devices.includes(device_id)) {
       if (found.devices.length >= found.allowed_devices) {
         return res.json({ 
@@ -1233,12 +1970,15 @@ app.post('/api/verify-key', async (req, res) => {
     found.total_verifications = (found.total_verifications || 0) + 1;
     found.last_verified = new Date().toISOString();
     await saveKeys(keys);
+    const registeredDevice = udidRouter.linkDeviceToKey(device_id, found.key_code);
 
     res.json({ 
       success: true, 
       message: 'Xác thực thành công', 
       type: found.type,
       expires_at: found.expires_at,
+      device_id,
+      device_linked: Boolean(registeredDevice),
       devices_remaining: found.allowed_devices - found.devices.length
     });
   } catch(err) {
@@ -1253,8 +1993,8 @@ app.post('/api/verify-key', async (req, res) => {
 
 app.post('/api/key-info', async (req, res) => {
   try {
-    const { key } = req.body || {};
-    
+    const submittedKey = req.body?.key;
+    const key = typeof submittedKey === 'string' ? submittedKey.trim() : '';
     if (!key) {
       return res.status(400).json({ success: false, message: 'Thiếu key' });
     }
@@ -1267,23 +2007,33 @@ app.post('/api/key-info', async (req, res) => {
     }
 
     const now = new Date();
-    const expiresAt = new Date(found.expires_at);
-    const isExpired = expiresAt < now;
-    const daysRemaining = Math.ceil((expiresAt - now) / (1000 * 60 * 60 * 24));
+    const isPermanent = isPermanentKey(found);
+    const expiresAt = isPermanent ? null : found.expires_at;
+    const expiresAtDate = expiresAt ? new Date(expiresAt) : null;
+    const isExpired = isKeyExpired(found, now.getTime());
+    const daysRemaining = isPermanent || isExpired || !expiresAtDate
+      ? null
+      : Math.ceil((expiresAtDate.getTime() - now.getTime()) / 86400000);
 
     res.json({
       success: true,
       info: {
+        key_code: found.key_code,
         type: found.type,
+        package_id: found.package_id || null,
         created_at: found.created_at,
-        expires_at: found.expires_at,
+        expires_at: expiresAt,
+        is_permanent: isPermanent,
+        is_disabled: isKeyDisabled(found),
         is_expired: isExpired,
-        days_remaining: isExpired ? 0 : daysRemaining,
-        devices_used: found.devices.length,
+        days_remaining: daysRemaining,
+        devices_used: Array.isArray(found.devices) ? found.devices.length : 0,
         devices_allowed: found.allowed_devices,
         total_verifications: found.total_verifications || 0,
         last_verified: found.last_verified || 'Never',
-        is_custom: found.is_custom || false
+        is_custom: found.is_custom || false,
+        active: !isExpired && !isKeyDisabled(found),
+        status: isKeyDisabled(found) ? 'disabled' : isExpired ? 'expired' : 'active'
       }
     });
   } catch(err) {
@@ -1499,8 +2249,8 @@ app.get('/api/admin/stats', requireAdmin, async (req, res) => {
       activeUsers: users.filter(u => u.isActive && !u.isBanned).length,
       bannedUsers: users.filter(u => u.isBanned).length,
       totalKeys: keys.length,
-      activeKeys: keys.filter(k => new Date(k.expires_at) > now).length,
-      expiredKeys: keys.filter(k => new Date(k.expires_at) <= now).length,
+      activeKeys: keys.filter(k => !isKeyDisabled(k) && !isKeyExpired(k, now.getTime())).length,
+      expiredKeys: keys.filter(k => isKeyExpired(k, now.getTime())).length,
       totalDevices: devices.length,
       totalVerifications: keys.reduce((sum, k) => sum + (k.total_verifications || 0), 0),
       totalAIRequests: aiLogs.length,
@@ -1694,7 +2444,15 @@ app.post("/api/device-uid/register", async (req, res) => {
         });
       }
 
-      if (new Date(found.expires_at) < new Date()) {
+      if (isKeyDisabled(found)) {
+        return res.status(403).json({
+          success: false,
+          message: "Key đã bị vô hiệu hóa",
+          error_code: "KEY_DISABLED"
+        });
+      }
+
+      if (isKeyExpired(found)) {
         return res.status(400).json({
           success: false,
           message: "Key đã hết hạn",
@@ -1786,8 +2544,10 @@ app.post("/api/device-uid/lookup", async (req, res) => {
         key_code:        k.key_code,
         type:            k.type,
         expires_at:      k.expires_at,
-        is_expired:      new Date(k.expires_at) < now,
-        days_remaining:  Math.max(0, Math.ceil((new Date(k.expires_at) - now) / 86400000)),
+        is_permanent:    isPermanentKey(k),
+        is_disabled:     isKeyDisabled(k),
+        is_expired:      isKeyExpired(k, now.getTime()),
+        days_remaining:  isPermanentKey(k) ? null : Math.max(0, Math.ceil((new Date(k.expires_at) - now) / 86400000)),
         devices_used:    k.devices.length,
         devices_allowed: k.allowed_devices
       }));
@@ -1835,8 +2595,10 @@ app.get("/api/device-uid/my-keys", async (req, res) => {
         key_code:        k.key_code,
         type:            k.type,
         expires_at:      k.expires_at,
-        is_expired:      new Date(k.expires_at) < now,
-        days_remaining:  Math.max(0, Math.ceil((new Date(k.expires_at) - now) / 86400000)),
+        is_permanent:    isPermanentKey(k),
+        is_disabled:     isKeyDisabled(k),
+        is_expired:      isKeyExpired(k, now.getTime()),
+        days_remaining:  isPermanentKey(k) ? null : Math.max(0, Math.ceil((new Date(k.expires_at) - now) / 86400000)),
         devices_used:    k.devices.length,
         devices_allowed: k.allowed_devices,
         total_verifications: k.total_verifications || 0
@@ -1889,7 +2651,7 @@ app.get("/api/admin/devices", requireAdmin, async (req, res) => {
       key_count:       d.keys.length,
       active_key_count: d.keys.filter(kc => {
         const k = keys.find(k => k.key_code === kc);
-        return k && new Date(k.expires_at) > now;
+        return k && !isKeyDisabled(k) && !isKeyExpired(k, now.getTime());
       }).length
     }));
 

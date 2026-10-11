@@ -1,0 +1,14 @@
+node_modules/
+.env
+.env.*
+
+keys.json
+users.json
+config.json
+devices.json
+udid_log.json
+activity_logs.json
+ai_logs.json
+backups/
+locks/
+*.tmp
