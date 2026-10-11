@@ -1466,6 +1466,11 @@ app.post('/api/admin/packages', async (req, res) => {
       return res.status(500).json({ success: false, message: 'Unable to save app package' });
     }
     await logActivity('create_app_package', 'admin', 'admin', { packageId });
+    if (packageMessage) {
+      await logActivity('package_message_sent', 'admin', 'admin', {
+        packageId, packageName: appPackage.name, message: packageMessage, enabled: appPackage.enabled
+      });
+    }
     res.status(201).json({ success: true, package: appPackage });
   } catch (err) {
     console.error('Create app package error:', err);
@@ -1495,6 +1500,7 @@ app.patch('/api/admin/packages/:packageId', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Name must be 1–80 characters' });
     }
 
+    const previousMessage = appPackage.message || '';
     if (enabled !== undefined) appPackage.enabled = enabled;
     if (message !== undefined) appPackage.message = message.trim();
     if (updateUrl !== undefined) appPackage.updateUrl = updateUrl.trim();
@@ -1504,6 +1510,11 @@ app.patch('/api/admin/packages/:packageId', async (req, res) => {
       return res.status(500).json({ success: false, message: 'Unable to save app package' });
     }
     await logActivity('update_app_package', 'admin', 'admin', { packageId: appPackage.id, enabled: appPackage.enabled });
+    if (message !== undefined && appPackage.message && appPackage.message !== previousMessage) {
+      await logActivity('package_message_sent', 'admin', 'admin', {
+        packageId: appPackage.id, packageName: appPackage.name, message: appPackage.message, enabled: appPackage.enabled
+      });
+    }
     res.json({ success: true, package: appPackage });
   } catch (err) {
     console.error('Update app package error:', err);
@@ -1540,6 +1551,71 @@ app.post('/api/admin/packages/:packageId/keys', async (req, res) => {
   } catch (err) {
     console.error('Assign package key error:', err);
     res.status(500).json({ success: false, message: 'Unable to update key assignment' });
+  }
+});
+
+app.get('/api/admin/notifications', async (req, res) => {
+  try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 100);
+    const [logs, packages] = await Promise.all([loadLogs(), loadPackages()]);
+    const packageById = new Map(packages.map(item => [item.id, item]));
+    const items = logs
+      .filter(log => log.action === 'package_message_sent' && log.details?.message)
+      .map(log => ({
+        id: log.id,
+        packageId: log.details.packageId,
+        packageName: packageById.get(log.details.packageId)?.name || log.details.packageName || log.details.packageId,
+        message: log.details.message,
+        sentAt: log.timestamp,
+        packageExists: packageById.has(log.details.packageId)
+      }));
+    // Tin nhắn đã lưu từ trước khi có nhật ký: hiện như thông báo hiện hành của gói.
+    const loggedPackages = new Set(items.map(item => item.packageId));
+    packages.forEach(appPackage => {
+      if (appPackage.message && !loggedPackages.has(appPackage.id)) {
+        items.push({
+          id: `current-${appPackage.id}`,
+          packageId: appPackage.id,
+          packageName: appPackage.name,
+          message: appPackage.message,
+          sentAt: appPackage.updated_at || appPackage.created_at || null,
+          packageExists: true
+        });
+      }
+    });
+    items.sort((a, b) => String(b.sentAt || '').localeCompare(String(a.sentAt || '')));
+    res.json({ success: true, total: items.length, notifications: items.slice(0, limit) });
+  } catch (err) {
+    console.error('List notifications error:', err);
+    res.status(500).json({ success: false, message: 'Không tải được thông báo hệ thống.' });
+  }
+});
+
+app.delete('/api/admin/packages/:packageId', async (req, res) => {
+  try {
+    const packageId = req.params.packageId;
+    const packages = await loadPackages();
+    const index = packages.findIndex(item => item.id === packageId);
+    if (index === -1) return res.status(404).json({ success: false, message: 'Không tìm thấy gói.' });
+
+    // Không xóa gói đang có key gắn: key mất gói sẽ bị coi là không thuộc gói nào.
+    const assigned = (await loadKeys()).filter(key => key.package_id === packageId);
+    if (assigned.length > 0) {
+      return res.status(409).json({
+        success: false,
+        message: `Gói còn ${assigned.length} key đang gắn. Hãy bỏ hết key khỏi gói trước khi xóa.`
+      });
+    }
+
+    const [removed] = packages.splice(index, 1);
+    if (!await savePackages(packages)) {
+      return res.status(500).json({ success: false, message: 'Không lưu được thay đổi.' });
+    }
+    await logActivity('delete_app_package', 'admin', 'admin', { packageId: removed.id });
+    res.json({ success: true, packageId: removed.id });
+  } catch (err) {
+    console.error('Delete app package error:', err);
+    res.status(500).json({ success: false, message: 'Không thể xóa gói.' });
   }
 });
 
