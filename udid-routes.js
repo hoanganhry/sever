@@ -162,6 +162,7 @@ module.exports = function udidRoutes(publicBaseUrl, getUdidPageUrl) {
 
   // Bước 1: sinh file cấu hình để thiết bị cài
   router.get('/api/udid/profile', (req, res) => {
+    console.info('[UDID] Profile Service profile requested');
     const session = req.query.session || uuidv4();
     const callbackUrl = `${publicBaseUrl}/api/udid/callback?session=${session}`;
     const payloadUUID = uuidv4().toUpperCase();
@@ -204,6 +205,12 @@ module.exports = function udidRoutes(publicBaseUrl, getUdidPageUrl) {
 
   // Bước 2: iOS POST CMS (DER, ký) chứa UDID về đây. Cần raw body, KHÔNG qua body-parser JSON.
   router.post('/api/udid/callback', express.raw({ type: '*/*', limit: '2mb' }), (req, res) => {
+    const bodyBytes = Buffer.isBuffer(req.body) ? req.body.length : 0;
+    console.info(`[UDID] Callback received (${bodyBytes} bytes; ${req.get('content-type') || 'unknown content type'})`);
+    res.on('finish', () => {
+      console.info(`[UDID] Callback finished with HTTP ${res.statusCode}`);
+    });
+
     const session = req.query.session || 'unknown';
     let plistXml = null;
 
@@ -243,6 +250,7 @@ module.exports = function udidRoutes(publicBaseUrl, getUdidPageUrl) {
         ip: req.ip
       };
       saveRecord(record);
+      console.info(`[UDID] Callback parsed; UDID ${record.udid ? 'captured' : 'missing'}`);
     } catch (err) {
       console.error('UDID callback save error:', err.message);
     }
