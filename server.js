@@ -41,6 +41,7 @@ function requiresDashboardAuth(req) {
     return true;
   }
   if (['GET', 'HEAD'].includes(req.method) && ['/', '/index.html'].includes(requestPath)) return true;
+  if (['/admin/data-migration', '/data-migration.html'].includes(requestPath)) return true;
   if (requestPath === '/api/admin' || requestPath.startsWith('/api/admin/')) return true;
   return DASHBOARD_PROTECTED_PATHS.has(requestPath);
 }
@@ -182,6 +183,10 @@ app.get(['/get-key', '/udid.html'], (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'udid.html'));
 });
 app.use(express.static('public'));
+app.get('/admin/data-migration', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.sendFile(path.join(__dirname, 'public', 'data-migration.html'));
+});
 
 app.use((req, res, next) => {
   const startTime = Date.now();
@@ -2314,6 +2319,135 @@ app.get('/api/admin/backups', requireAdmin, async (req, res) => {
   } catch(err) {
     console.error('List backups error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+const DATA_MIGRATION_FILES = [
+  { key: 'keys', filename: 'keys.json', path: DATA_FILE, type: 'array' },
+  { key: 'packages', filename: 'packages.json', path: PACKAGES_FILE, type: 'array' },
+  { key: 'users', filename: 'users.json', path: USERS_FILE, type: 'array' },
+  { key: 'config', filename: 'config.json', path: CONFIG_FILE, type: 'object' },
+  { key: 'devices', filename: 'devices.json', path: DEVICES_FILE, type: 'array' },
+  { key: 'udidRecords', filename: 'udid_log.json', path: UDID_FILE, type: 'array' },
+  { key: 'activityLogs', filename: 'activity_logs.json', path: LOGS_FILE, type: 'array' },
+  { key: 'aiLogs', filename: 'ai_logs.json', path: AI_LOGS_FILE, type: 'array' }
+];
+
+async function readMigrationData() {
+  const data = {};
+  for (const file of DATA_MIGRATION_FILES) {
+    const contents = await fs.readFile(file.path, 'utf8');
+    data[file.key] = JSON.parse(contents);
+  }
+  return data;
+}
+
+function validateMigrationData(body) {
+  if (!body || body.format !== 'authapi-data-backup' || body.version !== 1 || !body.data || typeof body.data !== 'object') {
+    return 'Invalid backup format.';
+  }
+
+  for (const file of DATA_MIGRATION_FILES) {
+    if (!Object.prototype.hasOwnProperty.call(body.data, file.key)) {
+      return `Backup is missing ${file.filename}.`;
+    }
+    const value = body.data[file.key];
+    if (file.type === 'array' && !Array.isArray(value)) {
+      return `${file.filename} must contain a JSON array.`;
+    }
+    if (file.type === 'object' && (!value || typeof value !== 'object' || Array.isArray(value))) {
+      return `${file.filename} must contain a JSON object.`;
+    }
+  }
+  return null;
+}
+
+async function importMigrationData(data) {
+  const stagingDir = path.join(DATA_DIR, `.data-import-${uuidv4()}`);
+  const stagedFiles = [];
+  const replacedFiles = [];
+  await fs.mkdir(stagingDir, { recursive: false });
+
+  try {
+    for (const file of DATA_MIGRATION_FILES) {
+      const stagedPath = path.join(stagingDir, file.filename);
+      await fs.writeFile(stagedPath, JSON.stringify(data[file.key], null, 2), 'utf8');
+      stagedFiles.push({ ...file, stagedPath });
+    }
+
+    for (const file of stagedFiles) {
+      const previousPath = path.join(stagingDir, `${file.filename}.previous`);
+      let hadPrevious = true;
+      try {
+        await fs.access(file.path);
+      } catch (err) {
+        if (err.code !== 'ENOENT') throw err;
+        hadPrevious = false;
+      }
+
+      const replaced = { path: file.path, previousPath, hadPrevious, installed: false };
+      replacedFiles.push(replaced);
+      if (hadPrevious) await fs.rename(file.path, previousPath);
+      await fs.rename(file.stagedPath, file.path);
+      replaced.installed = true;
+    }
+  } catch (err) {
+    for (const file of replacedFiles.reverse()) {
+      try {
+        if (file.installed) await fs.rm(file.path, { force: true });
+        if (file.hadPrevious) {
+          try {
+            await fs.access(file.previousPath);
+            await fs.rename(file.previousPath, file.path);
+          } catch (rollbackErr) {
+            if (rollbackErr.code !== 'ENOENT') throw rollbackErr;
+          }
+        }
+      } catch (rollbackErr) {
+        console.error('Data migration rollback failed:', rollbackErr.message);
+      }
+    }
+    throw err;
+  } finally {
+    await fs.rm(stagingDir, { recursive: true, force: true });
+  }
+}
+
+app.get('/api/admin/data-export', async (req, res) => {
+  try {
+    const data = await readMigrationData();
+    res.set('Cache-Control', 'no-store');
+    res.attachment(`authapi-data-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
+    res.json({ format: 'authapi-data-backup', version: 1, exportedAt: new Date().toISOString(), data });
+  } catch (err) {
+    console.error('Data export failed:', err.message);
+    res.status(500).json({ success: false, message: 'Could not read all application data for export.' });
+  }
+});
+
+app.post('/api/admin/data-import', async (req, res) => {
+  const validationError = validateMigrationData(req.body);
+  if (validationError) {
+    return res.status(400).json({ success: false, message: validationError });
+  }
+
+  try {
+    for (const file of DATA_MIGRATION_FILES) {
+      if (!['keys', 'packages', 'users', 'devices', 'udidRecords'].includes(file.key)) continue;
+      const current = JSON.parse(await fs.readFile(file.path, 'utf8'));
+      if (!Array.isArray(current) || current.length > 0) {
+        return res.status(409).json({
+          success: false,
+          message: 'Import is only allowed into an empty data directory to prevent overwriting existing data.'
+        });
+      }
+    }
+
+    await importMigrationData(req.body.data);
+    res.json({ success: true, importedFiles: DATA_MIGRATION_FILES.map(file => file.filename) });
+  } catch (err) {
+    console.error('Data import failed:', err.message);
+    res.status(500).json({ success: false, message: 'Data import failed; check server logs before retrying.' });
   }
 });
 

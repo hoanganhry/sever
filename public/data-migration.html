@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sao lưu / chuyển dữ liệu</title>
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+    body { max-width: 680px; margin: 48px auto; padding: 0 20px; line-height: 1.55; }
+    main { border: 1px solid #8886; border-radius: 12px; padding: 24px; }
+    button, input { font: inherit; margin: 6px 0; }
+    button { padding: 9px 14px; cursor: pointer; }
+    .warning { color: #b45309; font-weight: 600; }
+    #status { min-height: 1.5em; overflow-wrap: anywhere; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Sao lưu / chuyển dữ liệu</h1>
+    <p>Công cụ này xuất và nhập key, gói ứng dụng, tài khoản, thiết bị, UDID, cấu hình và nhật ký.</p>
+    <p class="warning">File sao lưu chứa dữ liệu riêng tư. Hãy giữ file an toàn và chỉ nhập vào thư mục dữ liệu mới, đang trống.</p>
+    <section>
+      <h2>1. Tải bản sao</h2>
+      <button id="export" type="button">Tải dữ liệu JSON</button>
+    </section>
+    <section>
+      <h2>2. Khôi phục vào ổ đĩa mới</h2>
+      <p>Chọn file JSON đã tải trước khi chuyển sang ổ đĩa persistent. Import sẽ bị từ chối nếu thư mục hiện tại đã có key, gói, tài khoản, thiết bị hoặc UDID.</p>
+      <input id="backup" type="file" accept="application/json,.json">
+      <br>
+      <button id="import" type="button">Khôi phục dữ liệu</button>
+    </section>
+    <p id="status" role="status" aria-live="polite"></p>
+  </main>
+  <script>
+    const status = document.getElementById('status');
+    const exportButton = document.getElementById('export');
+    const importButton = document.getElementById('import');
+
+    exportButton.addEventListener('click', async () => {
+      exportButton.disabled = true;
+      status.textContent = 'Đang tạo bản sao...';
+      try {
+        const response = await fetch('/api/admin/data-export', { cache: 'no-store' });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message || 'Không thể tải dữ liệu.');
+        const blob = new Blob([JSON.stringify(result, null, 2)], { type: 'application/json' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `authapi-data-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+        link.click();
+        URL.revokeObjectURL(link.href);
+        status.textContent = 'Đã tải bản sao dữ liệu. Hãy giữ file này an toàn.';
+      } catch (error) {
+        status.textContent = error.message;
+      } finally {
+        exportButton.disabled = false;
+      }
+    });
+
+    importButton.addEventListener('click', async () => {
+      const file = document.getElementById('backup').files[0];
+      if (!file) {
+        status.textContent = 'Hãy chọn file JSON bản sao trước.';
+        return;
+      }
+      if (!confirm('Chỉ tiếp tục nếu đây là thư mục dữ liệu mới và đang trống.')) return;
+
+      importButton.disabled = true;
+      status.textContent = 'Đang kiểm tra và khôi phục dữ liệu...';
+      try {
+        const backup = JSON.parse(await file.text());
+        const response = await fetch('/api/admin/data-import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(backup)
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message || 'Không thể khôi phục dữ liệu.');
+        status.textContent = `Khôi phục thành công ${result.importedFiles.length} file. Hãy tải lại dashboard.`;
+      } catch (error) {
+        status.textContent = error.message;
+      } finally {
+        importButton.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

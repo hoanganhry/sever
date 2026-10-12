@@ -23,15 +23,17 @@ Set both dashboard credentials in the hosting provider's private environment-var
 
 ## Keep data across Render restarts
 
-Render's default filesystem is temporary. To keep keys, packages, users, devices, UDID records, and backups after a restart or deploy, attach a persistent disk to the web service (available on paid Render instance plans):
+Render's default filesystem is temporary. To keep keys, packages, users, devices, UDID records, and backups after a restart or deploy, attach a persistent disk to the web service (available on paid Render instance plans).
 
-1. In Render, open the `sever-1niw` web service and add a disk with mount path `/var/data`.
-2. In the service's Environment settings, set `DATA_DIR` to `/var/data`.
-3. Save and wait for the deploy to finish before using the dashboard again.
+If the current service already has data, migrate it before switching directories:
 
-The server stores its JSON data files and backups under `DATA_DIR`. The UDID callback uses the same directory. Setting `DATA_DIR` without attaching a persistent disk does not preserve files.
+1. Wait for this version to deploy, then open `https://sever-1niw.onrender.com/admin/data-migration` and download the JSON backup while the old data is still available.
+2. In Render, open the `sever-1niw` web service and add a persistent disk with mount path `/var/data` (requires a paid instance plan).
+3. In the service's Environment settings, set `DATA_DIR` to `/var/data`, save, and wait for the deploy to finish.
+4. Open the data migration page again, select the downloaded JSON file, and restore it into the new empty disk. Keep the backup file private; it contains application data and configuration.
+5. Confirm the key, package, and device lists are present before resuming normal use.
 
-Before changing the data directory, download or otherwise back up the existing JSON data while the current service is still running. A newly mounted disk starts empty, and the old temporary files are not copied automatically. Verify the keys, packages, and devices after the disk-backed deploy before deleting any old copy.
+The server stores its JSON data files and backups under `DATA_DIR`. The UDID callback uses the same directory. Setting `DATA_DIR` without attaching a persistent disk does not preserve files. A newly mounted disk starts empty, and the old temporary files are not copied automatically. The import tool refuses to overwrite a data directory that already contains records.
 
 The Get UDID page is served directly from the API at `/get-key`; `/udid.html` redirects to this friendly path. Public key-verification, app-package-check, Get UDID flow, profile callback, and device-registration endpoints remain available to client apps.
 
