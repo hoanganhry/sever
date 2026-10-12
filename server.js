@@ -96,6 +96,7 @@ const LOGS_FILE = path.join(DATA_DIR, 'activity_logs.json');
 const AI_LOGS_FILE = path.join(DATA_DIR, 'ai_logs.json');
 const BACKUP_DIR = path.join(DATA_DIR, 'backups');
 const LOCK_DIR = path.join(DATA_DIR, 'locks');
+const UDID_FILE = path.join(DATA_DIR, 'udid_log.json');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'please-change-jwt-secret-2025';
 const HMAC_SECRET = process.env.HMAC_SECRET || 'please-change-hmac-secret-2025';
@@ -280,8 +281,8 @@ async function createBackup() {
     
     await fs.mkdir(backupSubDir, { recursive: true });
 
-    const filesToBackup = [DATA_FILE, USERS_FILE, CONFIG_FILE, DEVICES_FILE, LOGS_FILE, AI_LOGS_FILE];
-    
+    const filesToBackup = [DATA_FILE, PACKAGES_FILE, USERS_FILE, CONFIG_FILE, DEVICES_FILE, UDID_FILE, LOGS_FILE, AI_LOGS_FILE];
+
     for (const file of filesToBackup) {
       try {
         await fs.access(file);

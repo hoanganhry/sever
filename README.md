@@ -21,6 +21,18 @@ Set secrets in the hosting provider's environment-variable settings. Do not comm
 
 Set both dashboard credentials in the hosting provider's private environment-variable settings. The server checks them without exposing their values in the page or API responses.
 
+## Keep data across Render restarts
+
+Render's default filesystem is temporary. To keep keys, packages, users, devices, UDID records, and backups after a restart or deploy, attach a persistent disk to the web service (available on paid Render instance plans):
+
+1. In Render, open the `sever-1niw` web service and add a disk with mount path `/var/data`.
+2. In the service's Environment settings, set `DATA_DIR` to `/var/data`.
+3. Save and wait for the deploy to finish before using the dashboard again.
+
+The server stores its JSON data files and backups under `DATA_DIR`. The UDID callback uses the same directory. Setting `DATA_DIR` without attaching a persistent disk does not preserve files.
+
+Before changing the data directory, download or otherwise back up the existing JSON data while the current service is still running. A newly mounted disk starts empty, and the old temporary files are not copied automatically. Verify the keys, packages, and devices after the disk-backed deploy before deleting any old copy.
+
 The Get UDID page is served directly from the API at `/get-key`; `/udid.html` redirects to this friendly path. Public key-verification, app-package-check, Get UDID flow, profile callback, and device-registration endpoints remain available to client apps.
 
 When the dashboard's **Thiết bị** tab is open, its UDID list refreshes automatically every two seconds so newly captured devices appear without a manual refresh.

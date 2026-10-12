@@ -17,6 +17,7 @@ const failedSessions = new Map(); // session -> lý do lỗi (chỉ để báo c
 
 // Dùng cùng DATA_DIR với server.js để dữ liệu nằm trên Persistent Disk (nếu có)
 const DATA_DIR = process.env.DATA_DIR || __dirname;
+fs.mkdirSync(DATA_DIR, { recursive: true });
 const DB_FILE = path.join(DATA_DIR, 'udid_log.json');
 if (!fs.existsSync(DB_FILE)) fs.writeFileSync(DB_FILE, '[]');
 
