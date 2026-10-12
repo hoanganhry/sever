@@ -261,6 +261,9 @@ async function pushSnapshot(dataDir) {
     throw new Error(`GitHub data backup update conflicted (HTTP ${response.status}); retrying.`);
   }
   if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error('GitHub data backup update failed (HTTP 404). Verify GITHUB_DATA_REPO and GITHUB_DATA_BRANCH, and ensure GITHUB_DATA_TOKEN can access that repository with Contents: Read and write.');
+    }
     throw new Error(`GitHub data backup update failed (HTTP ${response.status}).`);
   }
   return true;

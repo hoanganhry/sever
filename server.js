@@ -367,7 +367,7 @@ async function safeLoadJSON(file, defaultValue = []) {
   return defaultValue;
 }
 
-async function safeSaveJSON(file, data) {
+async function safeSaveJSON(file, data, { syncBackup = true } = {}) {
   const filename = path.basename(file);
   
   for (let attempt = 1; attempt <= MAX_RETRY; attempt++) {
@@ -383,7 +383,7 @@ async function safeSaveJSON(file, data) {
       await fs.rename(tempFile, file);
       
       await fileLock.release(filename);
-      if (githubDataStore.isConfigured()) {
+      if (syncBackup && githubDataStore.isConfigured()) {
         try {
           await githubDataStore.syncNow(DATA_DIR);
         } catch (error) {
@@ -415,32 +415,32 @@ async function initializeFiles() {
     await fs.mkdir(DATA_DIR, { recursive: true });
     
     if (!fsSync.existsSync(DATA_FILE)) {
-      await safeSaveJSON(DATA_FILE, []);
+      await safeSaveJSON(DATA_FILE, [], { syncBackup: false });
       console.log('✅ Initialized keys.json');
     }
 
     if (!fsSync.existsSync(PACKAGES_FILE)) {
-      await safeSaveJSON(PACKAGES_FILE, []);
+      await safeSaveJSON(PACKAGES_FILE, [], { syncBackup: false });
       console.log('✅ Initialized packages.json');
     }
 
     if (!fsSync.existsSync(USERS_FILE)) {
-      await safeSaveJSON(USERS_FILE, []);
+      await safeSaveJSON(USERS_FILE, [], { syncBackup: false });
       console.log('✅ Initialized users.json');
     }
 
     if (!fsSync.existsSync(DEVICES_FILE)) {
-      await safeSaveJSON(DEVICES_FILE, []);
+      await safeSaveJSON(DEVICES_FILE, [], { syncBackup: false });
       console.log('✅ Initialized devices.json');
     }
 
     if (!fsSync.existsSync(LOGS_FILE)) {
-      await safeSaveJSON(LOGS_FILE, []);
+      await safeSaveJSON(LOGS_FILE, [], { syncBackup: false });
       console.log('✅ Initialized activity_logs.json');
     }
 
     if (!fsSync.existsSync(AI_LOGS_FILE)) {
-      await safeSaveJSON(AI_LOGS_FILE, []);
+      await safeSaveJSON(AI_LOGS_FILE, [], { syncBackup: false });
       console.log('✅ Initialized ai_logs.json');
     }
 
@@ -466,7 +466,7 @@ async function initializeFiles() {
           ai_provider: 'openai' // or 'anthropic'
         }
       };
-      await safeSaveJSON(CONFIG_FILE, cfg);
+      await safeSaveJSON(CONFIG_FILE, cfg, { syncBackup: false });
       console.log('✅ Initialized config.json');
     }
   } catch (err) {
@@ -2949,11 +2949,21 @@ app.use((req, res) => {
 /* ================= SERVER START ================= */
 async function startServer() {
   try {
-    await githubDataStore.restore(DATA_DIR);
+    let restoreFailed = false;
+    try {
+      await githubDataStore.restore(DATA_DIR);
+    } catch (error) {
+      restoreFailed = true;
+      console.error('[Git data] Restore failed; starting API without replacing local files:', error.message);
+    }
     await initializeFiles();
     await ensureBackupDir();
-    if (githubDataStore.isConfigured()) {
-      await githubDataStore.syncNow(DATA_DIR);
+    if (githubDataStore.isConfigured() && !restoreFailed) {
+      try {
+        await githubDataStore.syncNow(DATA_DIR);
+      } catch (error) {
+        console.error('[Git data] Initial backup failed; starting API without confirmed remote persistence:', error.message);
+      }
     }
     
     const server = app.listen(PORT, () => {

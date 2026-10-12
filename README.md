@@ -46,10 +46,10 @@ The service can also encrypt and sync its data snapshot to the private repositor
    - `GITHUB_DATA_TOKEN` = the fine-grained token
    - `GITHUB_DATA_ENCRYPTION_KEY` = a newly generated 64-character hexadecimal key, for example from `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`
 3. Keep a separate offline copy of the encryption key. The private Git backup cannot be decrypted without it. Never commit either secret to a repository.
-4. Save the environment settings and wait for Render to redeploy. On startup the service restores an encrypted Git snapshot before creating empty JSON files and confirms a baseline snapshot before accepting requests. When Git backup is configured, each successful local data write waits for GitHub sync; if sync fails, the API reports an error instead of claiming that the data was safely backed up.
+4. Save the environment settings and wait for Render to redeploy. On startup the service restores an encrypted Git snapshot before creating empty JSON files and tries to write a baseline snapshot before accepting requests. If GitHub rejects restore or the initial write, the API still starts without replacing local files so the dashboard remains reachable. Data-changing API requests report a backup error until the repository, branch, and token permissions are corrected.
 5. Check backup health with the authenticated `GET /api/admin/data-store/status` endpoint. It reports whether backup is enabled, the latest sync/restore times, and any last error; it never returns the GitHub token or encryption key.
 
-The backup is AES-256-GCM encrypted before it is sent to GitHub. If the token or encryption key is missing or invalid, the service logs a clear warning or startup error instead of silently replacing an unreadable backup with empty data. A Git backup is not a substitute for keeping the repository private or for an offline copy of its encryption key.
+The backup is AES-256-GCM encrypted before it is sent to GitHub. If the token or encryption key is missing or invalid, the service logs a clear warning or configuration error instead of silently replacing an unreadable backup with empty data. A Git backup is not a substitute for keeping the repository private or for an offline copy of its encryption key.
 
 The Get UDID page is served directly from the API at `/get-key`; `/udid.html` redirects to this friendly path. Public key-verification, app-package-check, Get UDID flow, profile callback, and device-registration endpoints remain available to client apps.
 
