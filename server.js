@@ -85,6 +85,7 @@ function dashboardPasswordAuth(req, res, next) {
 
 const udidRouter = udidRoutes(PUBLIC_BASE_URL, GET_UDID_PAGE_URL);
 app.use(cors());
+app.options('*', cors());
 app.use(dashboardPasswordAuth);
 app.use(udidRouter);
 /* ================= CONSTANTS ================= */
