@@ -35,6 +35,21 @@ If the current service already has data, migrate it before switching directories
 
 The server stores its JSON data files and backups under `DATA_DIR`. The UDID callback uses the same directory. Setting `DATA_DIR` without attaching a persistent disk does not preserve files. A newly mounted disk starts empty, and the old temporary files are not copied automatically. The import tool refuses to overwrite a data directory that already contains records.
 
+## Encrypted private Git backup
+
+The service can also encrypt and sync its data snapshot to the private repository `hoanganhry/sever-data-backup`. This is a backup/restore fallback; a Render persistent disk remains preferable for primary storage.
+
+1. Create a fine-grained GitHub token limited to `hoanganhry/sever-data-backup`, with **Contents: Read and write** permission.
+2. In Render's service Environment settings, add:
+   - `GITHUB_DATA_REPO` = `hoanganhry/sever-data-backup`
+   - `GITHUB_DATA_BRANCH` = `main`
+   - `GITHUB_DATA_TOKEN` = the fine-grained token
+   - `GITHUB_DATA_ENCRYPTION_KEY` = a newly generated 64-character hexadecimal key, for example from `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`
+3. Keep a separate offline copy of the encryption key. The private Git backup cannot be decrypted without it. Never commit either secret to a repository.
+4. Save the environment settings and wait for Render to redeploy. On startup the service restores an encrypted Git snapshot before creating empty JSON files; successful data changes are synced to Git after a short delay.
+
+The backup is AES-256-GCM encrypted before it is sent to GitHub. If the token or encryption key is missing or invalid, the service logs a clear warning or startup error instead of silently replacing an unreadable backup with empty data. A Git backup is not a substitute for keeping the repository private or for an offline copy of its encryption key.
+
 The Get UDID page is served directly from the API at `/get-key`; `/udid.html` redirects to this friendly path. Public key-verification, app-package-check, Get UDID flow, profile callback, and device-registration endpoints remain available to client apps.
 
 When the dashboard's **Thiết bị** tab is open, its UDID list refreshes automatically every two seconds so newly captured devices appear without a manual refresh.

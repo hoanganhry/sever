@@ -13,6 +13,7 @@ const { v4: uuidv4 } = require('uuid');
 const app = express();
 app.set('trust proxy', 1); // Render đứng sau proxy: để req.protocol/req.ip đúng
 const udidRoutes = require('./udid-routes');
+const githubDataStore = require('./github-data-store');
 const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || 'https://helo123-6le3.onrender.com').replace(/\/+$/, '');
 const GET_UDID_PAGE_URL = new URL('/get-key', `${PUBLIC_BASE_URL}/`).toString();
 const DASHBOARD_USERNAME = process.env.DASHBOARD_USERNAME || '';
@@ -381,6 +382,7 @@ async function safeSaveJSON(file, data) {
       await fs.rename(tempFile, file);
       
       await fileLock.release(filename);
+      githubDataStore.scheduleSync(DATA_DIR, `${filename} updated`);
       return true;
     } catch(err) {
       await fileLock.release(filename);
@@ -2444,6 +2446,7 @@ app.post('/api/admin/data-import', async (req, res) => {
     }
 
     await importMigrationData(req.body.data);
+    githubDataStore.scheduleSync(DATA_DIR, 'data import');
     res.json({ success: true, importedFiles: DATA_MIGRATION_FILES.map(file => file.filename) });
   } catch (err) {
     console.error('Data import failed:', err.message);
@@ -2931,6 +2934,7 @@ app.use((req, res) => {
 /* ================= SERVER START ================= */
 async function startServer() {
   try {
+    await githubDataStore.restore(DATA_DIR);
     await initializeFiles();
     await ensureBackupDir();
     
@@ -2957,12 +2961,18 @@ async function startServer() {
       console.log('═══════════════════════════════════════════════════');
       
       createBackup().catch(err => console.error('Initial backup failed:', err));
+      githubDataStore.scheduleSync(DATA_DIR, 'server startup');
     });
 
     const gracefulShutdown = async (signal) => {
       console.log(`\n${signal} received...`);
       console.log('Creating final backup...');
       await createBackup();
+      try {
+        await githubDataStore.syncNow(DATA_DIR);
+      } catch (err) {
+        console.error('Final Git data backup failed:', err.message);
+      }
       
       server.close(() => {
         console.log('Server closed gracefully');

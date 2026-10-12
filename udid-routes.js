@@ -9,6 +9,7 @@ const { v4: uuidv4 } = require('uuid');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const githubDataStore = require('./github-data-store');
 
 const router = express.Router();
 const GET_KEY_FLOW_TTL_MS = 10 * 60 * 1000;
@@ -62,6 +63,7 @@ function saveRecord(record) {
   }
   records.push(record);
   fs.writeFileSync(DB_FILE, JSON.stringify(mergeDuplicateUdids(records), null, 2));
+  githubDataStore.scheduleSync(DATA_DIR, 'UDID record updated');
 }
 
 function findRecord(session) {
@@ -74,6 +76,7 @@ function updateRecordByUdid(udid, patch, session = null) {
     if (records[i].udid === udid && (!session || records[i].session === session)) {
       Object.assign(records[i], patch);
       fs.writeFileSync(DB_FILE, JSON.stringify(records, null, 2));
+      githubDataStore.scheduleSync(DATA_DIR, 'UDID link updated');
       return records[i];
     }
   }
@@ -295,6 +298,7 @@ module.exports = function udidRoutes(publicBaseUrl, getUdidPageUrl) {
       const mergedRecords = mergeDuplicateUdids(sourceRecords);
       if (mergedRecords.length !== sourceRecords.length) {
         fs.writeFileSync(DB_FILE, JSON.stringify(mergedRecords, null, 2));
+        githubDataStore.scheduleSync(DATA_DIR, 'UDID records consolidated');
       }
       const records = mergedRecords.filter(r => r.udid).reverse();
       res.json({ success: true, count: records.length, devices: records });
