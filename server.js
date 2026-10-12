@@ -382,17 +382,26 @@ async function safeSaveJSON(file, data) {
       await fs.rename(tempFile, file);
       
       await fileLock.release(filename);
-      githubDataStore.scheduleSync(DATA_DIR, `${filename} updated`);
+      if (githubDataStore.isConfigured()) {
+        try {
+          await githubDataStore.syncNow(DATA_DIR);
+        } catch (error) {
+          const backupError = new Error(`Data saved locally, but Git backup failed: ${error.message}`);
+          backupError.code = 'GIT_DATA_BACKUP_FAILED';
+          throw backupError;
+        }
+      }
       return true;
     } catch(err) {
       await fileLock.release(filename);
+      if (err.code === 'GIT_DATA_BACKUP_FAILED') throw err;
       console.error(`❌ Error saving ${file} (attempt ${attempt}/${MAX_RETRY}):`, err.message);
       
       if (attempt < MAX_RETRY) {
         await new Promise(resolve => setTimeout(resolve, 100 * attempt));
       } else {
         console.error(`❌ Failed to save ${file} after ${MAX_RETRY} attempts`);
-        return false;
+        throw err;
       }
     }
   }
@@ -2324,6 +2333,11 @@ app.get('/api/admin/backups', requireAdmin, async (req, res) => {
   }
 });
 
+app.get('/api/admin/data-store/status', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json(githubDataStore.getStatus());
+});
+
 const DATA_MIGRATION_FILES = [
   { key: 'keys', filename: 'keys.json', path: DATA_FILE, type: 'array' },
   { key: 'packages', filename: 'packages.json', path: PACKAGES_FILE, type: 'array' },
@@ -2446,7 +2460,7 @@ app.post('/api/admin/data-import', async (req, res) => {
     }
 
     await importMigrationData(req.body.data);
-    githubDataStore.scheduleSync(DATA_DIR, 'data import');
+    if (githubDataStore.isConfigured()) await githubDataStore.syncNow(DATA_DIR);
     res.json({ success: true, importedFiles: DATA_MIGRATION_FILES.map(file => file.filename) });
   } catch (err) {
     console.error('Data import failed:', err.message);
@@ -2937,6 +2951,9 @@ async function startServer() {
     await githubDataStore.restore(DATA_DIR);
     await initializeFiles();
     await ensureBackupDir();
+    if (githubDataStore.isConfigured()) {
+      await githubDataStore.syncNow(DATA_DIR);
+    }
     
     const server = app.listen(PORT, () => {
       console.log('╔═══════════════════════════════════════════════════╗');
@@ -2961,7 +2978,6 @@ async function startServer() {
       console.log('═══════════════════════════════════════════════════');
       
       createBackup().catch(err => console.error('Initial backup failed:', err));
-      githubDataStore.scheduleSync(DATA_DIR, 'server startup');
     });
 
     const gracefulShutdown = async (signal) => {

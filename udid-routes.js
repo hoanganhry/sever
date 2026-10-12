@@ -51,7 +51,7 @@ function mergeDuplicateUdids(records) {
   return merged;
 }
 
-function saveRecord(record) {
+async function saveRecord(record) {
   let records = mergeDuplicateUdids(loadRecords());
   if (record.udid) {
     const previous = [...records].reverse().find(item => item.udid === record.udid);
@@ -63,7 +63,7 @@ function saveRecord(record) {
   }
   records.push(record);
   fs.writeFileSync(DB_FILE, JSON.stringify(mergeDuplicateUdids(records), null, 2));
-  githubDataStore.scheduleSync(DATA_DIR, 'UDID record updated');
+  if (githubDataStore.isConfigured()) await githubDataStore.syncNow(DATA_DIR);
 }
 
 function findRecord(session) {
@@ -76,15 +76,16 @@ function updateRecordByUdid(udid, patch, session = null) {
     if (records[i].udid === udid && (!session || records[i].session === session)) {
       Object.assign(records[i], patch);
       fs.writeFileSync(DB_FILE, JSON.stringify(records, null, 2));
-      githubDataStore.scheduleSync(DATA_DIR, 'UDID link updated');
       return records[i];
     }
   }
   return null;
 }
 
-function linkDeviceToKey(udid, key) {
-  return updateRecordByUdid(udid, { linkedKey: key, linkedAt: new Date().toISOString() });
+async function linkDeviceToKey(udid, key) {
+  const record = updateRecordByUdid(udid, { linkedKey: key, linkedAt: new Date().toISOString() });
+  if (record && githubDataStore.isConfigured()) await githubDataStore.syncNow(DATA_DIR);
+  return record;
 }
 
 function pruneGetKeyFlows() {
@@ -212,7 +213,7 @@ module.exports = function udidRoutes(publicBaseUrl, getUdidPageUrl) {
   });
 
   // Bước 2: iOS POST UDID về đây. Cần raw body.
-  router.post('/api/udid/callback', express.raw({ type: () => true, limit: '2mb' }), (req, res) => {
+  router.post('/api/udid/callback', express.raw({ type: () => true, limit: '2mb' }), async (req, res) => {
     const requested = typeof req.query.session === 'string' ? req.query.session : '';
     const session = SESSION_RE.test(requested) ? requested : 'unknown';
     const bodyBytes = Buffer.isBuffer(req.body) ? req.body.length : 0;
@@ -224,7 +225,7 @@ module.exports = function udidRoutes(publicBaseUrl, getUdidPageUrl) {
       if (plistXml) {
         udid = extractPlistString(plistXml, 'UDID');
         if (udid) {
-          saveRecord({
+          await saveRecord({
             session,
             udid,
             product: extractPlistString(plistXml, 'PRODUCT'),
@@ -292,13 +293,13 @@ module.exports = function udidRoutes(publicBaseUrl, getUdidPageUrl) {
   });
 
   // Danh sách UDID (đã được dashboardPasswordAuth bảo vệ trong server.js)
-  router.get('/api/udid/list', (req, res) => {
+  router.get('/api/udid/list', async (req, res) => {
     try {
       const sourceRecords = loadRecords();
       const mergedRecords = mergeDuplicateUdids(sourceRecords);
       if (mergedRecords.length !== sourceRecords.length) {
         fs.writeFileSync(DB_FILE, JSON.stringify(mergedRecords, null, 2));
-        githubDataStore.scheduleSync(DATA_DIR, 'UDID records consolidated');
+        if (githubDataStore.isConfigured()) await githubDataStore.syncNow(DATA_DIR);
       }
       const records = mergedRecords.filter(r => r.udid).reverse();
       res.json({ success: true, count: records.length, devices: records });
@@ -307,27 +308,33 @@ module.exports = function udidRoutes(publicBaseUrl, getUdidPageUrl) {
     }
   });
 
-  router.post('/api/udid/link-key', express.json(), (req, res) => {
-    const { udid, key, flowId } = req.body || {};
-    if (!udid || !key) {
-      return res.status(400).json({ success: false, message: 'Thiếu udid hoặc key' });
-    }
-    if (flowId) {
-      const flow = getGetKeyFlow(flowId);
-      if (!flow || flow.key !== key) {
-        return res.status(403).json({ success: false, message: 'Phiên Get Key không hợp lệ hoặc đã hết hạn. Hãy bắt đầu lại.' });
+  router.post('/api/udid/link-key', express.json(), async (req, res) => {
+    try {
+      const { udid, key, flowId } = req.body || {};
+      if (!udid || !key) {
+        return res.status(400).json({ success: false, message: 'Thiếu udid hoặc key' });
       }
+      if (flowId) {
+        const flow = getGetKeyFlow(flowId);
+        if (!flow || flow.key !== key) {
+          return res.status(403).json({ success: false, message: 'Phiên Get Key không hợp lệ hoặc đã hết hạn. Hãy bắt đầu lại.' });
+        }
+      }
+      const updated = updateRecordByUdid(
+        udid,
+        { linkedKey: key, linkedAt: new Date().toISOString() },
+        flowId || null
+      );
+      if (!updated) {
+        return res.status(404).json({ success: false, message: 'Không tìm thấy UDID này trong danh sách đã capture' });
+      }
+      if (githubDataStore.isConfigured()) await githubDataStore.syncNow(DATA_DIR);
+      if (flowId) completeGetKeyFlow(flowId);
+      res.json({ success: true, device: updated });
+    } catch (err) {
+      console.error('[UDID] Failed to persist device link:', err.message);
+      res.status(500).json({ success: false, message: 'Không thể đồng bộ dữ liệu thiết bị lên bản sao lưu.' });
     }
-    const updated = updateRecordByUdid(
-      udid,
-      { linkedKey: key, linkedAt: new Date().toISOString() },
-      flowId || null
-    );
-    if (!updated) {
-      return res.status(404).json({ success: false, message: 'Không tìm thấy UDID này trong danh sách đã capture' });
-    }
-    if (flowId) completeGetKeyFlow(flowId);
-    res.json({ success: true, device: updated });
   });
 
   router.getDeviceRecords = () => mergeDuplicateUdids(loadRecords()).filter(record => record.udid);

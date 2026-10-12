@@ -24,6 +24,13 @@ let encryptionKey;
 let syncTimer = null;
 let syncInProgress = null;
 let syncAgain = false;
+const state = {
+  status: 'disabled',
+  lastAttemptAt: null,
+  lastSuccessAt: null,
+  lastRestoreAt: null,
+  lastError: null
+};
 
 if (token || repository || encryptionKeyHex) {
   if (!/^[\w.-]+\/[\w.-]+$/.test(repository) || !token || !/^[a-f0-9]{64}$/i.test(encryptionKeyHex)) {
@@ -34,6 +41,15 @@ if (token || repository || encryptionKeyHex) {
 
 function isConfigured() {
   return Boolean(encryptionKey);
+}
+
+function getStatus() {
+  return {
+    ...state,
+    enabled: isConfigured(),
+    repository: isConfigured() ? repository : null,
+    branch: isConfigured() ? branch : null
+  };
 }
 
 function headers() {
@@ -137,71 +153,86 @@ async function getRemoteFile() {
 
 async function restore(dataDir) {
   if (!isConfigured()) {
+    state.status = 'disabled';
+    state.lastError = 'Git backup credentials are not configured.';
     console.warn('[Git data] Persistence is disabled; configure the private Git backup environment variables.');
     return false;
   }
 
-  const localData = await readLocalData(dataDir);
-  if (hasLocalRecords(localData)) {
-    console.warn('[Git data] Local records already exist; preserving them instead of restoring over them.');
-    return false;
-  }
-
-  const remote = await getRemoteFile();
-  if (!remote) {
-    console.info('[Git data] No backup exists yet; starting with the current data directory.');
-    return false;
-  }
-
-  const restoredData = decrypt(remote.content);
-  const stagingDir = path.join(dataDir, `.git-data-restore-${crypto.randomUUID()}`);
-  await fs.mkdir(stagingDir, { recursive: false });
-  const installed = [];
-
+  state.status = 'restoring';
+  state.lastError = null;
   try {
-    for (const [key, filename] of FILES) {
-      const stagedFile = path.join(stagingDir, filename);
-      await fs.writeFile(stagedFile, JSON.stringify(restoredData[key], null, 2), 'utf8');
+    const localData = await readLocalData(dataDir);
+    if (hasLocalRecords(localData)) {
+      state.status = 'local-data-preserved';
+      console.warn('[Git data] Local records already exist; preserving them instead of restoring over them.');
+      return false;
     }
 
-    for (const [key, filename] of FILES) {
-      const destination = path.join(dataDir, filename);
-      const stagedFile = path.join(stagingDir, filename);
-      const previousFile = path.join(stagingDir, `${filename}.previous`);
-      let hadPrevious = true;
-      try {
-        await fs.access(destination);
-      } catch (error) {
-        if (error.code !== 'ENOENT') throw error;
-        hadPrevious = false;
-      }
-      const state = { destination, previousFile, hadPrevious, installed: false };
-      installed.push(state);
-      if (hadPrevious) await fs.rename(destination, previousFile);
-      await fs.rename(stagedFile, destination);
-      state.installed = true;
+    const remote = await getRemoteFile();
+    if (!remote) {
+      state.status = 'no-backup';
+      console.info('[Git data] No backup exists yet; starting with the current data directory.');
+      return false;
     }
-    console.info('[Git data] Restored encrypted data backup from the private repository.');
-    return true;
-  } catch (error) {
-    for (const state of installed.reverse()) {
-      try {
-        if (state.installed) await fs.rm(state.destination, { force: true });
-        if (state.hadPrevious) {
-          try {
-            await fs.access(state.previousFile);
-            await fs.rename(state.previousFile, state.destination);
-          } catch (restoreError) {
-            if (restoreError.code !== 'ENOENT') throw restoreError;
-          }
+
+    const restoredData = decrypt(remote.content);
+    const stagingDir = path.join(dataDir, `.git-data-restore-${crypto.randomUUID()}`);
+    await fs.mkdir(stagingDir, { recursive: false });
+    const installed = [];
+
+    try {
+      for (const [key, filename] of FILES) {
+        const stagedFile = path.join(stagingDir, filename);
+        await fs.writeFile(stagedFile, JSON.stringify(restoredData[key], null, 2), 'utf8');
+      }
+
+      for (const [key, filename] of FILES) {
+        const destination = path.join(dataDir, filename);
+        const stagedFile = path.join(stagingDir, filename);
+        const previousFile = path.join(stagingDir, `${filename}.previous`);
+        let hadPrevious = true;
+        try {
+          await fs.access(destination);
+        } catch (error) {
+          if (error.code !== 'ENOENT') throw error;
+          hadPrevious = false;
         }
-      } catch (rollbackError) {
-        console.error('[Git data] Restore rollback failed:', rollbackError.message);
+        const fileState = { destination, previousFile, hadPrevious, installed: false };
+        installed.push(fileState);
+        if (hadPrevious) await fs.rename(destination, previousFile);
+        await fs.rename(stagedFile, destination);
+        fileState.installed = true;
       }
+      state.status = 'restored';
+      state.lastRestoreAt = new Date().toISOString();
+      console.info('[Git data] Restored encrypted data backup from the private repository.');
+      return true;
+    } catch (error) {
+      for (const fileState of installed.reverse()) {
+        try {
+          if (fileState.installed) await fs.rm(fileState.destination, { force: true });
+          if (fileState.hadPrevious) {
+            try {
+              await fs.access(fileState.previousFile);
+              await fs.rename(fileState.previousFile, fileState.destination);
+            } catch (restoreError) {
+              if (restoreError.code !== 'ENOENT') throw restoreError;
+            }
+          }
+        } catch (rollbackError) {
+          console.error('[Git data] Restore rollback failed:', rollbackError.message);
+        }
+      }
+      throw error;
+    } finally {
+      await fs.rm(stagingDir, { recursive: true, force: true });
     }
+  } catch (error) {
+    state.status = 'error';
+    state.lastError = error.message;
+    console.error('[Git data] Restore failed:', error.message);
     throw error;
-  } finally {
-    await fs.rm(stagingDir, { recursive: true, force: true });
   }
 }
 
@@ -236,33 +267,46 @@ async function pushSnapshot(dataDir) {
 }
 
 async function syncNow(dataDir) {
-  if (!isConfigured()) return false;
+  if (!isConfigured()) {
+    state.status = 'disabled';
+    state.lastError = 'Git backup credentials are not configured.';
+    return false;
+  }
   if (syncInProgress) {
     syncAgain = true;
     return syncInProgress;
   }
 
+  state.status = 'syncing';
+  state.lastAttemptAt = new Date().toISOString();
+  state.lastError = null;
   syncInProgress = (async () => {
     let changed = false;
     try {
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        try {
-          changed = await pushSnapshot(dataDir);
-          break;
-        } catch (error) {
-          if (attempt === 3) throw error;
-          console.warn(`[Git data] Sync attempt ${attempt} failed: ${error.message}`);
-          await new Promise(resolve => setTimeout(resolve, attempt * 1000));
+      do {
+        syncAgain = false;
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          try {
+            changed = (await pushSnapshot(dataDir)) || changed;
+            break;
+          } catch (error) {
+            if (attempt === 3) throw error;
+            console.warn(`[Git data] Sync attempt ${attempt} failed: ${error.message}`);
+            await new Promise(resolve => setTimeout(resolve, attempt * 1000));
+          }
         }
-      }
+      } while (syncAgain);
+      state.status = 'synced';
+      state.lastSuccessAt = new Date().toISOString();
       if (changed) console.info('[Git data] Encrypted data backup updated.');
       return changed;
+    } catch (error) {
+      state.status = 'error';
+      state.lastError = error.message;
+      console.error('[Git data] Backup failed:', error.message);
+      throw error;
     } finally {
       syncInProgress = null;
-      if (syncAgain) {
-        syncAgain = false;
-        scheduleSync(dataDir, 'queued update');
-      }
     }
   })();
   return syncInProgress;
@@ -280,4 +324,4 @@ function scheduleSync(dataDir, reason = 'data update') {
   syncTimer.unref?.();
 }
 
-module.exports = { isConfigured, restore, scheduleSync, syncNow };
+module.exports = { getStatus, isConfigured, restore, scheduleSync, syncNow };
