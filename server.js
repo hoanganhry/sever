@@ -84,6 +84,7 @@ function dashboardPasswordAuth(req, res, next) {
 }
 
 const udidRouter = udidRoutes(PUBLIC_BASE_URL, GET_UDID_PAGE_URL);
+app.use(cors());
 app.use(dashboardPasswordAuth);
 app.use(udidRouter);
 /* ================= CONSTANTS ================= */
@@ -168,7 +169,6 @@ app.use((err, req, res, next) => {
 });
 
 /* ================= MIDDLEWARE ================= */
-app.use(cors());
 app.use(bodyParser.json({ limit: '10mb' }));
 app.get(['/get-key', '/udid.html'], (req, res) => {
   if (req.path === '/udid.html') {
