@@ -2067,7 +2067,14 @@ app.post('/api/verify-key', async (req, res) => {
 
     found.total_verifications = (found.total_verifications || 0) + 1;
     found.last_verified = new Date().toISOString();
-    await saveKeys(keys);
+    let backupWarning = null;
+    try {
+      await saveKeys(keys);
+    } catch (err) {
+      if (err.code !== 'GIT_DATA_BACKUP_FAILED') throw err;
+      console.error('Key verified and saved locally, but remote backup failed:', err.message);
+      backupWarning = 'Key saved on this server, but remote backup failed. Data may not survive a server restart.';
+    }
     const registeredDevice = udidRouter.linkDeviceToKey(device_id, found.key_code);
 
     res.json({ 
@@ -2077,7 +2084,8 @@ app.post('/api/verify-key', async (req, res) => {
       expires_at: found.expires_at,
       device_id,
       device_linked: Boolean(registeredDevice),
-      devices_remaining: found.allowed_devices - found.devices.length
+      devices_remaining: found.allowed_devices - found.devices.length,
+      backup_warning: backupWarning
     });
   } catch(err) {
     console.error('Verify error:', err);
