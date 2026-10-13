@@ -13,7 +13,6 @@ const { v4: uuidv4 } = require('uuid');
 const app = express();
 app.set('trust proxy', 1); // Render đứng sau proxy: để req.protocol/req.ip đúng
 const udidRoutes = require('./udid-routes');
-const githubDataStore = require('./github-data-store');
 const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || 'https://helo123-6le3.onrender.com').replace(/\/+$/, '');
 const GET_UDID_PAGE_URL = new URL('/get-key', `${PUBLIC_BASE_URL}/`).toString();
 const DASHBOARD_USERNAME = process.env.DASHBOARD_USERNAME || '';
@@ -367,7 +366,7 @@ async function safeLoadJSON(file, defaultValue = []) {
   return defaultValue;
 }
 
-async function safeSaveJSON(file, data, { syncBackup = true } = {}) {
+async function safeSaveJSON(file, data) {
   const filename = path.basename(file);
   
   for (let attempt = 1; attempt <= MAX_RETRY; attempt++) {
@@ -383,19 +382,9 @@ async function safeSaveJSON(file, data, { syncBackup = true } = {}) {
       await fs.rename(tempFile, file);
       
       await fileLock.release(filename);
-      if (syncBackup && githubDataStore.isConfigured()) {
-        try {
-          await githubDataStore.syncNow(DATA_DIR);
-        } catch (error) {
-          const backupError = new Error(`Data saved locally, but Git backup failed: ${error.message}`);
-          backupError.code = 'GIT_DATA_BACKUP_FAILED';
-          throw backupError;
-        }
-      }
       return true;
     } catch(err) {
       await fileLock.release(filename);
-      if (err.code === 'GIT_DATA_BACKUP_FAILED') throw err;
       console.error(`❌ Error saving ${file} (attempt ${attempt}/${MAX_RETRY}):`, err.message);
       
       if (attempt < MAX_RETRY) {
@@ -415,32 +404,32 @@ async function initializeFiles() {
     await fs.mkdir(DATA_DIR, { recursive: true });
     
     if (!fsSync.existsSync(DATA_FILE)) {
-      await safeSaveJSON(DATA_FILE, [], { syncBackup: false });
+      await safeSaveJSON(DATA_FILE, []);
       console.log('✅ Initialized keys.json');
     }
 
     if (!fsSync.existsSync(PACKAGES_FILE)) {
-      await safeSaveJSON(PACKAGES_FILE, [], { syncBackup: false });
+      await safeSaveJSON(PACKAGES_FILE, []);
       console.log('✅ Initialized packages.json');
     }
 
     if (!fsSync.existsSync(USERS_FILE)) {
-      await safeSaveJSON(USERS_FILE, [], { syncBackup: false });
+      await safeSaveJSON(USERS_FILE, []);
       console.log('✅ Initialized users.json');
     }
 
     if (!fsSync.existsSync(DEVICES_FILE)) {
-      await safeSaveJSON(DEVICES_FILE, [], { syncBackup: false });
+      await safeSaveJSON(DEVICES_FILE, []);
       console.log('✅ Initialized devices.json');
     }
 
     if (!fsSync.existsSync(LOGS_FILE)) {
-      await safeSaveJSON(LOGS_FILE, [], { syncBackup: false });
+      await safeSaveJSON(LOGS_FILE, []);
       console.log('✅ Initialized activity_logs.json');
     }
 
     if (!fsSync.existsSync(AI_LOGS_FILE)) {
-      await safeSaveJSON(AI_LOGS_FILE, [], { syncBackup: false });
+      await safeSaveJSON(AI_LOGS_FILE, []);
       console.log('✅ Initialized ai_logs.json');
     }
 
@@ -466,7 +455,7 @@ async function initializeFiles() {
           ai_provider: 'openai' // or 'anthropic'
         }
       };
-      await safeSaveJSON(CONFIG_FILE, cfg, { syncBackup: false });
+      await safeSaveJSON(CONFIG_FILE, cfg);
       console.log('✅ Initialized config.json');
     }
   } catch (err) {
@@ -2067,14 +2056,7 @@ app.post('/api/verify-key', async (req, res) => {
 
     found.total_verifications = (found.total_verifications || 0) + 1;
     found.last_verified = new Date().toISOString();
-    let backupWarning = null;
-    try {
-      await saveKeys(keys);
-    } catch (err) {
-      if (err.code !== 'GIT_DATA_BACKUP_FAILED') throw err;
-      console.error('Key verified and saved locally, but remote backup failed:', err.message);
-      backupWarning = 'Key saved on this server, but remote backup failed. Data may not survive a server restart.';
-    }
+    await saveKeys(keys);
     const registeredDevice = udidRouter.linkDeviceToKey(device_id, found.key_code);
 
     res.json({ 
@@ -2084,8 +2066,7 @@ app.post('/api/verify-key', async (req, res) => {
       expires_at: found.expires_at,
       device_id,
       device_linked: Boolean(registeredDevice),
-      devices_remaining: found.allowed_devices - found.devices.length,
-      backup_warning: backupWarning
+      devices_remaining: found.allowed_devices - found.devices.length
     });
   } catch(err) {
     console.error('Verify error:', err);
@@ -2342,11 +2323,6 @@ app.get('/api/admin/backups', requireAdmin, async (req, res) => {
   }
 });
 
-app.get('/api/admin/data-store/status', (req, res) => {
-  res.set('Cache-Control', 'no-store');
-  res.json(githubDataStore.getStatus());
-});
-
 const DATA_MIGRATION_FILES = [
   { key: 'keys', filename: 'keys.json', path: DATA_FILE, type: 'array' },
   { key: 'packages', filename: 'packages.json', path: PACKAGES_FILE, type: 'array' },
@@ -2469,7 +2445,6 @@ app.post('/api/admin/data-import', async (req, res) => {
     }
 
     await importMigrationData(req.body.data);
-    if (githubDataStore.isConfigured()) await githubDataStore.syncNow(DATA_DIR);
     res.json({ success: true, importedFiles: DATA_MIGRATION_FILES.map(file => file.filename) });
   } catch (err) {
     console.error('Data import failed:', err.message);
@@ -2957,22 +2932,8 @@ app.use((req, res) => {
 /* ================= SERVER START ================= */
 async function startServer() {
   try {
-    let restoreFailed = false;
-    try {
-      await githubDataStore.restore(DATA_DIR);
-    } catch (error) {
-      restoreFailed = true;
-      console.error('[Git data] Restore failed; starting API without replacing local files:', error.message);
-    }
     await initializeFiles();
     await ensureBackupDir();
-    if (githubDataStore.isConfigured() && !restoreFailed) {
-      try {
-        await githubDataStore.syncNow(DATA_DIR);
-      } catch (error) {
-        console.error('[Git data] Initial backup failed; starting API without confirmed remote persistence:', error.message);
-      }
-    }
     
     const server = app.listen(PORT, () => {
       console.log('╔═══════════════════════════════════════════════════╗');
@@ -3003,11 +2964,6 @@ async function startServer() {
       console.log(`\n${signal} received...`);
       console.log('Creating final backup...');
       await createBackup();
-      try {
-        await githubDataStore.syncNow(DATA_DIR);
-      } catch (err) {
-        console.error('Final Git data backup failed:', err.message);
-      }
       
       server.close(() => {
         console.log('Server closed gracefully');

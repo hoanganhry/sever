@@ -35,22 +35,6 @@ If the current service already has data, migrate it before switching directories
 
 The server stores its JSON data files and backups under `DATA_DIR`. The UDID callback uses the same directory. Setting `DATA_DIR` without attaching a persistent disk does not preserve files. A newly mounted disk starts empty, and the old temporary files are not copied automatically. The import tool refuses to overwrite a data directory that already contains records.
 
-## Encrypted private Git backup
-
-The service can also encrypt and sync its data snapshot to the private repository `hoanganhry/sever-data-backup`. This is a backup/restore fallback; a Render persistent disk remains preferable for primary storage.
-
-1. Create a fine-grained GitHub token limited to `hoanganhry/sever-data-backup`, with **Contents: Read and write** permission.
-2. In Render's service Environment settings, add:
-   - `GITHUB_DATA_REPO` = `hoanganhry/sever-data-backup`
-   - `GITHUB_DATA_BRANCH` = `main`
-   - `GITHUB_DATA_TOKEN` = the fine-grained token
-   - `GITHUB_DATA_ENCRYPTION_KEY` = a newly generated 64-character hexadecimal key, for example from `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`
-3. Keep a separate offline copy of the encryption key. The private Git backup cannot be decrypted without it. Never commit either secret to a repository.
-4. Save the environment settings and wait for Render to redeploy. On startup the service restores an encrypted Git snapshot before creating empty JSON files and tries to write a baseline snapshot before accepting requests. If GitHub rejects restore or the initial write, the API still starts without replacing local files so the dashboard remains reachable. Data-changing API requests report a backup error until the repository, branch, and token permissions are corrected; key verification returns success with a `backup_warning` after its local write succeeds so the app can proceed, but the change may not survive a server restart.
-5. Check backup health with the authenticated `GET /api/admin/data-store/status` endpoint. It reports whether backup is enabled, the latest sync/restore times, and any last error; it never returns the GitHub token or encryption key.
-
-The backup is AES-256-GCM encrypted before it is sent to GitHub. If the token or encryption key is missing or invalid, the service logs a clear warning or configuration error instead of silently replacing an unreadable backup with empty data. A Git backup is not a substitute for keeping the repository private or for an offline copy of its encryption key.
-
 The Get UDID page is served directly from the API at `/get-key`; `/udid.html` redirects to this friendly path. Public key-verification, app-package-check, Get UDID flow, profile callback, and device-registration endpoints remain available to client apps.
 
 When the dashboard's **Thiết bị** tab is open, its UDID list refreshes automatically every two seconds so newly captured devices appear without a manual refresh.
@@ -65,8 +49,6 @@ AI features remain unavailable when their provider credential is not configured.
 ## App package checks
 
 Create and manage app packages in the dashboard's **Gói ứng dụng** tab after signing in with the private dashboard username and password. Package-management APIs require the same credentials; public app package lookup remains available to client apps. Assign each license key to its intended package when creating the key. The app can start a Get Key registration with `POST /api/udid/start` and JSON `{ "key": "<issued-key>", "packageId": "<package-id>" }`. On success, open the returned `registrationUrl` in Safari. The URL uses the friendly `/get-key` path and contains a random, one-time flow token, not the key; the flow expires after 10 minutes. The page installs the UDID profile, then verifies and links the key to that device automatically. Successful `POST /api/verify-key` calls also link any previously captured UDID to the verified key. Duplicate captures of the same UDID are consolidated into one device record. On iPhone/iPad the page captures the actual UDID. The key list shows captured model and iOS details when available. The app should call `POST /api/app/check-package` with its package ID and key when it starts and periodically while running. It must send that same package ID to `POST /api/verify-key`.
-
-If verification saves the key locally but the Git backup fails, `POST /api/verify-key` responds with `success: true` and a `backup_warning` field. The app may continue, but the server data is not confirmed as backed up and may be lost on restart; correct the Git backup configuration or attach a persistent Render disk.
 
 When a package is disabled, the check endpoint returns `allowed: false` with a configured message and optional update URL. The app should show the message and safely block protected features; it should not crash.
 

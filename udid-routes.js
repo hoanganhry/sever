@@ -9,7 +9,6 @@ const { v4: uuidv4 } = require('uuid');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const githubDataStore = require('./github-data-store');
 
 const router = express.Router();
 const GET_KEY_FLOW_TTL_MS = 10 * 60 * 1000;
@@ -63,7 +62,6 @@ async function saveRecord(record) {
   }
   records.push(record);
   fs.writeFileSync(DB_FILE, JSON.stringify(mergeDuplicateUdids(records), null, 2));
-  if (githubDataStore.isConfigured()) await githubDataStore.syncNow(DATA_DIR);
 }
 
 function findRecord(session) {
@@ -82,10 +80,8 @@ function updateRecordByUdid(udid, patch, session = null) {
   return null;
 }
 
-async function linkDeviceToKey(udid, key) {
-  const record = updateRecordByUdid(udid, { linkedKey: key, linkedAt: new Date().toISOString() });
-  if (record && githubDataStore.isConfigured()) await githubDataStore.syncNow(DATA_DIR);
-  return record;
+function linkDeviceToKey(udid, key) {
+  return updateRecordByUdid(udid, { linkedKey: key, linkedAt: new Date().toISOString() });
 }
 
 function pruneGetKeyFlows() {
@@ -299,7 +295,6 @@ module.exports = function udidRoutes(publicBaseUrl, getUdidPageUrl) {
       const mergedRecords = mergeDuplicateUdids(sourceRecords);
       if (mergedRecords.length !== sourceRecords.length) {
         fs.writeFileSync(DB_FILE, JSON.stringify(mergedRecords, null, 2));
-        if (githubDataStore.isConfigured()) await githubDataStore.syncNow(DATA_DIR);
       }
       const records = mergedRecords.filter(r => r.udid).reverse();
       res.json({ success: true, count: records.length, devices: records });
@@ -328,12 +323,11 @@ module.exports = function udidRoutes(publicBaseUrl, getUdidPageUrl) {
       if (!updated) {
         return res.status(404).json({ success: false, message: 'Không tìm thấy UDID này trong danh sách đã capture' });
       }
-      if (githubDataStore.isConfigured()) await githubDataStore.syncNow(DATA_DIR);
       if (flowId) completeGetKeyFlow(flowId);
       res.json({ success: true, device: updated });
     } catch (err) {
       console.error('[UDID] Failed to persist device link:', err.message);
-      res.status(500).json({ success: false, message: 'Không thể đồng bộ dữ liệu thiết bị lên bản sao lưu.' });
+      res.status(500).json({ success: false, message: 'Không thể lưu liên kết thiết bị với key.' });
     }
   });
 
