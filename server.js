@@ -538,9 +538,10 @@ async function logActivity(action, userId, username, details = {}) {
     };
     
     logs.push(log);
-    await saveLogs(logs);
+    return await saveLogs(logs);
   } catch(err) {
     console.error('❌ Log error:', err);
+    return false;
   }
 }
 
@@ -1190,12 +1191,25 @@ app.get('/api/list-keys', async (req, res) => {
       });
     });
     const keys = await loadKeys();
+    const now = Date.now();
     res.json(keys.map(key => {
       const devices = [...new Set((Array.isArray(key.devices) ? key.devices : [])
         .filter(udid => typeof udid === 'string' && udid.trim()))];
+      const appSessions = (Array.isArray(key.app_sessions) ? key.app_sessions : [])
+        .filter(session => session && typeof session.device_id === 'string')
+        .map(session => ({
+          device_id: session.device_id,
+          package_id: session.package_id || null,
+          last_seen: session.last_seen || null,
+          is_online: !isKeyDisabled(key) && !isKeyExpired(key, now) &&
+            session.package_id === key.package_id &&
+            session.is_active === true &&
+            now - new Date(session.last_seen).getTime() <= 60000
+        }));
       return {
         ...key,
         devices,
+        app_sessions: appSessions,
         device_info: devices.map(udid =>
           deviceDetailsByUdid.get(udid) || { udid, product: null, version: null, capturedAt: null }
         )
@@ -1413,6 +1427,96 @@ app.post('/api/app/check-package', async (req, res) => {
   }
 });
 
+async function findActiveAppLicense(key, deviceId, packageId) {
+  const license = (await loadKeys()).find(item => item.key_code === key);
+  if (!license || license.package_id !== packageId || isKeyDisabled(license) ||
+      isKeyExpired(license) || signValue(license.key_code) !== license.signature ||
+      !Array.isArray(license.devices) || !license.devices.includes(deviceId)) {
+    return null;
+  }
+  const appPackage = (await loadPackages()).find(item => item.id === packageId);
+  return appPackage ? { license, appPackage } : null;
+}
+
+app.post('/api/app/heartbeat', async (req, res) => {
+  try {
+    const { key: submittedKey, device_id: submittedDeviceId, packageId, active } = req.body || {};
+    const key = typeof submittedKey === 'string' ? submittedKey.trim() : '';
+    const deviceId = typeof submittedDeviceId === 'string' ? submittedDeviceId.trim() : '';
+    const normalizedPackageId = typeof packageId === 'string' ? packageId.trim() : '';
+    if (!key || !deviceId || !normalizedPackageId || typeof active !== 'boolean') {
+      return res.status(400).json({ success: false, message: 'key, device_id, packageId and active are required' });
+    }
+
+    const keys = await loadKeys();
+    const license = keys.find(item => item.key_code === key);
+    if (!license || license.package_id !== normalizedPackageId ||
+        !Array.isArray(license.devices) || !license.devices.includes(deviceId)) {
+      return res.status(403).json({ success: false, message: 'Key or device is not authorized for this app package' });
+    }
+    if (active && !await findActiveAppLicense(key, deviceId, normalizedPackageId)) {
+      return res.status(403).json({ success: false, message: 'Key or app package is not active' });
+    }
+
+    const sessions = Array.isArray(license.app_sessions) ? license.app_sessions : [];
+    const session = sessions.find(item => item.device_id === deviceId && item.package_id === normalizedPackageId);
+    const now = new Date().toISOString();
+    if (session) {
+      session.is_active = active;
+      session.last_seen = now;
+    } else {
+      sessions.push({
+        device_id: deviceId,
+        package_id: normalizedPackageId,
+        is_active: active,
+        last_seen: now
+      });
+    }
+    license.app_sessions = sessions.slice(-100);
+    if (!await saveKeys(keys)) {
+      return res.status(500).json({ success: false, message: 'Unable to save app activity status' });
+    }
+    res.json({ success: true, active, last_seen: now });
+  } catch (err) {
+    console.error('Update app activity error:', err);
+    res.status(500).json({ success: false, message: 'Unable to update app activity status' });
+  }
+});
+
+app.post('/api/app/notifications', async (req, res) => {
+  try {
+    const { key: submittedKey, device_id: submittedDeviceId, packageId, since } = req.body || {};
+    const key = typeof submittedKey === 'string' ? submittedKey.trim() : '';
+    const deviceId = typeof submittedDeviceId === 'string' ? submittedDeviceId.trim() : '';
+    const normalizedPackageId = typeof packageId === 'string' ? packageId.trim() : '';
+    const sinceTime = typeof since === 'string' ? Date.parse(since) : NaN;
+    if (!key || !deviceId || !normalizedPackageId || !Number.isFinite(sinceTime)) {
+      return res.status(400).json({ success: false, message: 'key, device_id, packageId and a valid since timestamp are required' });
+    }
+    if (!await findActiveAppLicense(key, deviceId, normalizedPackageId)) {
+      return res.status(403).json({ success: false, message: 'Key or app package is not active' });
+    }
+
+    const notifications = (await loadLogs())
+      .filter(log => log.action === 'package_message_sent' &&
+        typeof log.id === 'string' &&
+        log.details?.packageId === normalizedPackageId &&
+        typeof log.details.message === 'string' &&
+        Date.parse(log.timestamp) >= sinceTime)
+      .sort((left, right) => String(left.timestamp).localeCompare(String(right.timestamp)))
+      .slice(0, 100)
+      .map(log => ({
+        id: log.id,
+        message: log.details.message,
+        sentAt: log.timestamp
+      }));
+    res.json({ success: true, notifications });
+  } catch (err) {
+    console.error('Fetch app notifications error:', err);
+    res.status(500).json({ success: false, message: 'Unable to fetch app notifications' });
+  }
+});
+
 app.get('/api/admin/packages', async (req, res) => {
   try {
     const [packages, keys] = await Promise.all([loadPackages(), loadKeys()]);
@@ -1558,6 +1662,31 @@ app.post('/api/admin/packages/:packageId/keys', async (req, res) => {
   } catch (err) {
     console.error('Assign package key error:', err);
     res.status(500).json({ success: false, message: 'Unable to update key assignment' });
+  }
+});
+
+app.post('/api/admin/packages/:packageId/notifications', async (req, res) => {
+  try {
+    const packageId = req.params.packageId;
+    const message = typeof req.body?.message === 'string' ? req.body.message.trim() : '';
+    if (!message || message.length > 500) {
+      return res.status(400).json({ success: false, message: 'Thông báo phải có từ 1 đến 500 ký tự.' });
+    }
+    const appPackage = (await loadPackages()).find(item => item.id === packageId);
+    if (!appPackage) return res.status(404).json({ success: false, message: 'Không tìm thấy gói ứng dụng.' });
+    const logged = await logActivity('package_message_sent', 'admin', 'admin', {
+      packageId: appPackage.id,
+      packageName: appPackage.name,
+      message,
+      enabled: appPackage.enabled
+    });
+    if (!logged) {
+      return res.status(500).json({ success: false, message: 'Không lưu được thông báo.' });
+    }
+    res.json({ success: true, message: 'Thông báo đã được gửi đến ứng dụng.' });
+  } catch (err) {
+    console.error('Send app notification error:', err);
+    res.status(500).json({ success: false, message: 'Không gửi được thông báo.' });
   }
 });
 

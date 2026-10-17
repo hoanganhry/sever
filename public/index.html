@@ -676,7 +676,8 @@
           <div class="pkg-field">
             <label for="pkgEditMessage">Tin nhắn gửi đến app <span id="pkgEditCount">0/500</span></label>
             <textarea id="pkgEditMessage" maxlength="500" placeholder="Ví dụ: Hệ thống bảo trì đến 22:00, vui lòng quay lại sau."></textarea>
-            <p class="pkg-help">Hiển thị trong app ở lần kiểm tra kế tiếp, không phụ thuộc gói đang bật hay tắt.</p>
+            <p class="pkg-help">Lưu nội dung này làm tin nhắn của gói. Dùng nút bên dưới để gửi thông báo mới đến app đang mở.</p>
+            <button class="btn secondary" type="button" id="pkgEditNotify" onclick="sendPackageNotification()">Gửi thông báo đến app đang mở</button>
           </div>
           <div class="pkg-field">
             <label for="pkgEditUrl">Link cập nhật</label>
@@ -1438,12 +1439,31 @@ async function savePackage() {
     });
     if (ok && data.success) {
       await refreshPackagesKeepModal();
-      setPackageFeedback('Đã lưu. App sẽ nhận tin nhắn ở lần kiểm tra API kế tiếp.', true);
+      setPackageFeedback('Đã lưu thông tin gói.', true);
     } else {
       setPackageFeedback(data.message || 'Không lưu được thay đổi.', false);
     }
   } finally {
     saveBtn.disabled = false;
+  }
+}
+
+async function sendPackageNotification() {
+  if (!editingPackageId) return;
+  const message = $('pkgEditMessage').value.trim();
+  if (!message) { setPackageFeedback('Nhập nội dung thông báo trước khi gửi.', false); return; }
+  const sendButton = $('pkgEditNotify');
+  sendButton.disabled = true;
+  try {
+    const { ok, data } = await api(`/api/admin/packages/${encodeURIComponent(editingPackageId)}/notifications`, {
+      method: 'POST',
+      body: JSON.stringify({ message })
+    });
+    setPackageFeedback(ok && data.success
+      ? 'Đã gửi. App đang mở sẽ hiển thị thông báo trong vài giây.'
+      : data.message || 'Không gửi được thông báo.', ok && data.success);
+  } finally {
+    sendButton.disabled = false;
   }
 }
 
@@ -2101,7 +2121,7 @@ async function loadAllKeys() {
     const now = new Date();
     wrap.innerHTML = `<table id="keysTable"><thead><tr>
       <th class="select-column"><input id="keysSelectPage" type="checkbox" aria-label="Chọn tất cả key trên trang" onchange="toggleVisibleKeySelection(this.checked)"></th>
-      <th>Key</th><th>Thiết bị đã dùng</th><th>Ngày tạo</th><th>Hết hạn</th><th>Thời lượng</th><th>Kích hoạt</th><th>Gói</th><th>Nguồn</th><th>Trạng thái</th>
+      <th>Key</th><th>Thiết bị đã dùng</th><th>App</th><th>Ngày tạo</th><th>Hết hạn</th><th>Thời lượng</th><th>Kích hoạt</th><th>Gói</th><th>Nguồn</th><th>Trạng thái</th>
     </tr></thead><tbody>${data.map(k => {
       const expiresAt = k.is_permanent === true ? null : new Date(k.expires_at);
       const expired = k.is_permanent !== true && (!Number.isFinite(expiresAt.getTime()) || expiresAt <= now);
@@ -2117,6 +2137,16 @@ async function loadAllKeys() {
         const capturedAt = device?.capturedAt ? new Date(device.capturedAt).toLocaleString('vi-VN') : '';
         return `<div class="mono-cell">${escapeHtml(uid)}</div>${description ? `<small>${escapeHtml(description)}</small>` : ''}${capturedAt ? `<small>Nhận UDID: ${escapeHtml(capturedAt)}</small>` : ''}`;
       }).join('') : '—';
+      const appSessions = Array.isArray(k.app_sessions) ? k.app_sessions : [];
+      const onlineSessions = appSessions.filter(session => session.is_online === true);
+      const lastActiveSession = appSessions
+        .filter(session => session.last_seen)
+        .sort((left, right) => String(right.last_seen).localeCompare(String(left.last_seen)))[0];
+      const appStatus = onlineSessions.length
+        ? `<span class="tag live">Đang hoạt động (${onlineSessions.length})</span>`
+        : lastActiveSession
+          ? `<span class="tag expired">Không hoạt động</span><small>Gần nhất: ${escapeHtml(new Date(lastActiveSession.last_seen).toLocaleString('vi-VN'))}</small>`
+          : '<span class="tag">Chưa mở app</span>';
       const disabled = k.is_disabled === true;
       return `<tr>
         <td class="select-column"><input class="key-select" type="checkbox" data-key="${escapeHtml(k.key_code || '')}" aria-label="Chọn key ${escapeHtml(k.key_code || '')}" ${selectedKeyCodes.has(k.key_code) ? 'checked' : ''} onchange="toggleKeySelection(this.dataset.key,this.checked)"></td>
@@ -2129,6 +2159,7 @@ async function loadAllKeys() {
           </div>
         </div></div></td>
         <td data-label="Thiết bị đã dùng">${deviceSummary}</td>
+        <td data-label="App">${appStatus}</td>
         <td data-label="Ngày tạo">${createdAt}</td>
         <td data-label="Hết hạn">${k.is_permanent === true ? 'Vĩnh viễn' : Number.isNaN(expiresAt.getTime()) ? '—' : expiresAt.toLocaleDateString('vi-VN')}</td>
         <td data-label="Thời lượng">${k.is_permanent === true ? 'Vĩnh viễn' : Number.isNaN(expiresAt.getTime()) || !k.created_at ? '—' : Math.max(0, Math.ceil((expiresAt - new Date(k.created_at)) / 86400000)) + ' ngày'}</td>
@@ -2196,6 +2227,9 @@ setInterval(loadOverview, 30000);
 setInterval(() => {
   if (activeTab === 'devices' && !document.hidden) loadUdidDevices();
 }, 2000);
+setInterval(() => {
+  if (activeTab === 'keys' && !document.hidden) loadAllKeys();
+}, 10000);
 </script>
 </body>
 </html>
