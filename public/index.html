@@ -2139,13 +2139,25 @@ async function loadAllKeys() {
       }).join('') : '—';
       const appSessions = Array.isArray(k.app_sessions) ? k.app_sessions : [];
       const onlineSessions = appSessions.filter(session => session.is_online === true);
+      const lastVerifiedAt = k.last_verified ? new Date(k.last_verified) : null;
+      const recentlyVerified = Boolean(
+        k.package_id &&
+        k.is_disabled !== true &&
+        !expired &&
+        lastVerifiedAt &&
+        Number.isFinite(lastVerifiedAt.getTime()) &&
+        now.getTime() - lastVerifiedAt.getTime() <= 30 * 60 * 1000
+      );
       const lastActiveSession = appSessions
         .filter(session => session.last_seen)
         .sort((left, right) => String(right.last_seen).localeCompare(String(left.last_seen)))[0];
-      const appStatus = onlineSessions.length
-        ? `<span class="tag live">Đang hoạt động (${onlineSessions.length})</span>`
+      const activeSessionCount = Math.max(onlineSessions.length, recentlyVerified ? 1 : 0);
+      const appStatus = activeSessionCount
+        ? `<span class="tag live">Đang hoạt động (${activeSessionCount})</span>`
         : lastActiveSession
           ? `<span class="tag expired">Không hoạt động</span><small>Gần nhất: ${escapeHtml(new Date(lastActiveSession.last_seen).toLocaleString('vi-VN'))}</small>`
+          : lastVerifiedAt
+            ? `<span class="tag expired">Không hoạt động</span><small>Gần nhất: ${escapeHtml(lastVerifiedAt.toLocaleString('vi-VN'))}</small>`
           : '<span class="tag">Chưa mở app</span>';
       const disabled = k.is_disabled === true;
       return `<tr>
