@@ -37,6 +37,8 @@ The server stores its JSON data files and backups under `DATA_DIR`. The UDID cal
 
 The Get UDID page is served directly from the API at `/get-key`; `/udid.html` redirects to this friendly path. Public key-verification, app-package-check, Get UDID flow, profile callback, and device-registration endpoints remain available to client apps.
 
+`GET /api/udid/my-key?udid=<device-udid>` returns `found: true` when the UDID is still present in server capture records, whether or not it has been linked to a key. Apps can use this check before reusing a locally saved UDID and restart the Get UDID flow if the server no longer recognizes it.
+
 When the dashboard's **Thiết bị** tab is open, its UDID list refreshes automatically every two seconds so newly captured devices appear without a manual refresh.
 
 Optional AI provider credentials:
@@ -58,6 +60,6 @@ Keys can be created with a fixed duration or set to **Vĩnh viễn**. Permanent 
 
 In the dashboard's package editor, **Gửi thông báo đến app đang mở** records a notification for that package. Authorized app clients retrieve new messages from `POST /api/app/notifications` with `{ "key", "device_id", "packageId", "since" }`; the server returns only messages for that package and requires a valid assigned key and registered device. The app polls while its scene is active and displays received messages in-app. The package's saved message remains separate from these one-off notifications.
 
-The app reports foreground status with `POST /api/app/heartbeat` and `{ "key", "device_id", "packageId", "active" }`. The dashboard key list shows **Đang hoạt động** while an active heartbeat is less than 60 seconds old; it shows the most recent activity time after the app goes inactive or stops checking in. App clients should report `active: false` when leaving the foreground and refresh `active: true` periodically while open. Notifications are delivered while the app is running in the foreground; delivery while suspended or closed requires separately configured APNs credentials and app entitlements.
+The app reports activity with `POST /api/app/heartbeat` and `{ "key", "device_id", "packageId", "active" }`. The dashboard key list keeps the app **Đang hoạt động** for up to 24 hours after the last active heartbeat, so moving to another app or letting iOS suspend the app does not immediately mark its key inactive. The app resumes heartbeats and notification polling when brought back to the foreground. Because iOS may terminate a suspended app without notifying it, the dashboard falls back to inactive after 24 hours without a heartbeat; force-quitting the app cannot be reliably detected immediately. Notifications are delivered while the app is running in the foreground; delivery while suspended or closed requires separately configured APNs credentials and app entitlements.
 
 The key list's three-dot menu can edit a key's type, package, device limit, and expiration, or disable, re-enable, and delete that key. `PATCH /api/admin/keys/:keyCode` accepts `type`, `packageId`, `allowed_devices`, `expiresAt`, and/or `is_disabled`; use `expiresAt: null` for a permanent key. Disabled keys are rejected by key verification, app-package checks, and Get Key/device registration. Dashboard management endpoints require the private dashboard credentials; client verification and Get Key endpoints remain public.

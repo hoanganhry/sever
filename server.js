@@ -1204,7 +1204,7 @@ app.get('/api/list-keys', async (req, res) => {
           is_online: !isKeyDisabled(key) && !isKeyExpired(key, now) &&
             session.package_id === key.package_id &&
             session.is_active === true &&
-            now - new Date(session.last_seen).getTime() <= 60000
+            now - new Date(session.last_seen).getTime() <= 24 * 60 * 60 * 1000
         }));
       return {
         ...key,

@@ -267,10 +267,13 @@ module.exports = function udidRoutes(publicBaseUrl, getUdidPageUrl) {
   router.get('/api/udid/my-key', (req, res) => {
     const udid = req.query.udid;
     if (!udid) return res.status(400).json({ success: false, message: 'Thiếu udid' });
-    const records = loadRecords().filter(r => r.udid === udid && r.linkedKey);
-    if (records.length === 0) return res.json({ success: true, linked: false });
+    const matchingRecords = loadRecords().filter(record => record.udid === udid);
+    const records = matchingRecords.filter(record => record.linkedKey);
+    if (records.length === 0) {
+      return res.json({ success: true, found: matchingRecords.length > 0, linked: false });
+    }
     const latest = records[records.length - 1];
-    res.json({ success: true, linked: true, key: latest.linkedKey, linkedAt: latest.linkedAt });
+    res.json({ success: true, found: true, linked: true, key: latest.linkedKey, linkedAt: latest.linkedAt });
   });
 
   router.get('/api/udid/flow', (req, res) => {
