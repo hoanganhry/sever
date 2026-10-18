@@ -113,6 +113,7 @@ const MAX_MEMORY_MB = 450;
 const MAX_LOGS = 1000;
 const LOCK_TIMEOUT = 5000;
 const MAX_RETRY = 3;
+const APP_ACTIVITY_TTL_MS = 30 * 60 * 1000;
 
 // AI Limits
 const AI_DAILY_LIMIT = 100; // 100 requests/day
@@ -1203,8 +1204,7 @@ app.get('/api/list-keys', async (req, res) => {
           last_seen: session.last_seen || null,
           is_online: !isKeyDisabled(key) && !isKeyExpired(key, now) &&
             session.package_id === key.package_id &&
-            session.is_active === true &&
-            now - new Date(session.last_seen).getTime() <= 24 * 60 * 60 * 1000
+            now - new Date(session.last_seen).getTime() <= APP_ACTIVITY_TTL_MS
         }));
       return {
         ...key,
@@ -2185,6 +2185,24 @@ app.post('/api/verify-key', async (req, res) => {
 
     found.total_verifications = (found.total_verifications || 0) + 1;
     found.last_verified = new Date().toISOString();
+    if (typeof packageId === 'string' && packageId === found.package_id) {
+      const sessions = Array.isArray(found.app_sessions) ? found.app_sessions : [];
+      const session = sessions.find(item =>
+        item.device_id === device_id && item.package_id === packageId
+      );
+      if (session) {
+        session.is_active = true;
+        session.last_seen = found.last_verified;
+      } else {
+        sessions.push({
+          device_id,
+          package_id: packageId,
+          is_active: true,
+          last_seen: found.last_verified
+        });
+      }
+      found.app_sessions = sessions.slice(-100);
+    }
     await saveKeys(keys);
     const registeredDevice = udidRouter.linkDeviceToKey(device_id, found.key_code);
 
