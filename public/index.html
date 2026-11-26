@@ -325,6 +325,16 @@
   .key-menu-popover button{display:block; width:100%; border:0; border-radius:4px; padding:8px 9px; background:transparent; color:#596477; text-align:left; font:12px var(--sans); cursor:pointer;}
   .key-menu-popover button:hover{background:#f3f4ff; color:var(--amber);}
   .key-menu-popover button.danger{color:#d94c50;}
+  .history-details{min-width:190px; max-width:360px;}
+  .history-details summary{display:flex; align-items:center; gap:7px; cursor:pointer; color:#596477; list-style-position:inside; white-space:nowrap;}
+  .history-details summary strong{font-weight:600;}
+  .history-details summary small{overflow:hidden; text-overflow:ellipsis; color:#9099aa;}
+  .history-list{display:grid; gap:5px; max-height:150px; overflow:auto; margin-top:6px; padding:7px; background:#f7f8fc; border:1px solid #edf0f5; border-radius:5px;}
+  .history-entry{min-width:0; display:grid; grid-template-columns:minmax(70px,.7fr) minmax(120px,1.3fr); gap:2px 8px; padding:4px 2px; border-bottom:1px solid #e9ecf2; font-size:10px; line-height:1.35;}
+  .history-entry:last-child{border-bottom:0;}
+  .history-entry strong{overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#596477;}
+  .history-entry span,.history-entry small{overflow-wrap:anywhere; color:#7c8799;}
+  .history-entry small{grid-column:1/-1;}
   .key-edit-modal{position:fixed; inset:0; z-index:32; display:flex; align-items:center; justify-content:center; padding:20px; background:rgba(25,34,52,.48);}
   .key-edit-modal[hidden]{display:none;}
   .key-edit-dialog{width:min(640px,100%); max-height:calc(100vh - 40px); overflow:auto; background:#fff; border:1px solid #e8eaf0; border-radius:8px; padding:20px; box-shadow:0 16px 50px rgba(22,32,50,.22);}
@@ -1847,7 +1857,7 @@ async function toggleKeyDisabled(keyCode) {
     return;
   }
   const disable = key.is_disabled !== true;
-  if (!confirm(`${disable ? 'Vô hiệu hóa' : 'Bật lại'} key "${keyCode}"?`)) return;
+  if (!confirm(`${disable ? 'Tắt quyền dùng app PatchPro và menu' : 'Bật lại quyền dùng app PatchPro và menu'} cho mã "${keyCode}"?`)) return;
   let result;
   try {
     result = await api(`/api/admin/keys/${encodeURIComponent(keyCode)}`, {
@@ -1866,7 +1876,7 @@ async function toggleKeyDisabled(keyCode) {
   }
   await Promise.all([loadAllKeys(), loadOverview()]);
   openSuccessModal(disable ? 'Đã tắt key' : 'Đã bật key',
-    disable ? 'Key này sẽ không thể xác thực cho đến khi được bật lại.' : 'Key có thể xác thực trở lại.',
+    disable ? 'Ứng dụng PatchPro và menu sẽ bị khóa cho đến khi bạn bật lại mã.' : 'Ứng dụng PatchPro và menu có thể xác thực trở lại.',
     { 'Key': keyCode, 'Trạng thái': disable ? 'Đã tắt' : 'Đang bật' });
 }
 
@@ -2192,7 +2202,7 @@ async function loadAllKeys() {
           <button class="key-menu-trigger" type="button" aria-label="Thao tác key ${escapeHtml(k.key_code || '')}" aria-haspopup="true" aria-expanded="false" onclick="toggleKeyMenu(event,this)">⋯</button>
           <div class="key-menu-popover" hidden>
             <button type="button" data-key="${escapeHtml(k.key_code || '')}" onclick="handleKeyMenuAction(this.dataset.key,'edit')">Chỉnh sửa key</button>
-            <button type="button" data-key="${escapeHtml(k.key_code || '')}" onclick="handleKeyMenuAction(this.dataset.key,'toggle')">${disabled ? 'Bật lại key' : 'Tắt key'}</button>
+            <button type="button" data-key="${escapeHtml(k.key_code || '')}" onclick="handleKeyMenuAction(this.dataset.key,'toggle')">${disabled ? 'Bật lại mã app + menu' : 'Tắt mã app + menu'}</button>
             <button class="danger" type="button" data-key="${escapeHtml(k.key_code || '')}" onclick="handleKeyMenuAction(this.dataset.key,'delete')">Xóa key</button>
           </div>
         </div></div></td>
@@ -2278,6 +2288,11 @@ async function loadDeviceCodes() {
       return;
     }
 
+    const openHistoryFor = new Set(
+      [...wrap.querySelectorAll('#deviceCodesTable tbody tr[data-udid]')]
+        .filter(row => row.querySelector('.history-details[open]'))
+        .map(row => row.dataset.udid)
+    );
     wrap.innerHTML = `<table id="deviceCodesTable"><thead><tr>
       <th>Mã riêng</th><th>UDID</th><th>Key liên kết</th><th>L&#x1ECB;ch s&#x1EED; nh&#x1EAD;p t&#x1EEB; PatchPro</th><th>Model</th><th>iOS</th><th>Thời gian cấp mã</th>
     </tr></thead><tbody>${devices.map(device => {
@@ -2285,16 +2300,23 @@ async function loadDeviceCodes() {
       const issuedAt = device.deviceCodeCreatedAt || (code ? device.linkedAt : null);
       const keyEntries = Array.isArray(device.keyEntries) ? [...device.keyEntries].reverse() : [];
       const keyEntryHistory = keyEntries.length
-        ? keyEntries.map(entry => {
-          const place = entry.entrypoint === 'home' ? 'Home' : entry.entrypoint === 'menu' ? 'In-game menu' : 'Setup';
-          const date = entry.verifiedAt && Number.isFinite(new Date(entry.verifiedAt).getTime())
-            ? new Date(entry.verifiedAt).toLocaleString('vi-VN')
-            : '\u2014';
-          const usedCode = entry.deviceCode ? ' · Device code: ' + escapeHtml(entry.deviceCode) : '';
-          return escapeHtml(entry.key || '\u2014') + ' \u00b7 ' + escapeHtml(entry.source || 'PatchPro') + ' \u00b7 ' + place + ' \u00b7 ' + escapeHtml(date) + usedCode;
-        }).join('<br>')
-        : 'Ch\u01b0a c\u00f3 l\u01b0\u1ee3t nh\u1eadp t\u1eeb PatchPro';
-      return `<tr>
+        ? (() => {
+          const latest = keyEntries[0];
+          const latestDate = latest.verifiedAt && Number.isFinite(new Date(latest.verifiedAt).getTime())
+            ? new Date(latest.verifiedAt).toLocaleString('vi-VN')
+            : 'Chưa rõ thời gian';
+          const entries = keyEntries.map(entry => {
+            const place = entry.entrypoint === 'home' ? 'Home' : entry.entrypoint === 'menu' ? 'In-game menu' : 'Setup';
+            const date = entry.verifiedAt && Number.isFinite(new Date(entry.verifiedAt).getTime())
+              ? new Date(entry.verifiedAt).toLocaleString('vi-VN')
+              : '—';
+            const usedCode = entry.deviceCode ? `<small>Mã thiết bị: ${escapeHtml(entry.deviceCode)}</small>` : '';
+            return `<div class="history-entry"><strong>${escapeHtml(entry.key || '—')}</strong><span>${escapeHtml(entry.source || 'PatchPro')} · ${place}</span><small>${escapeHtml(date)}</small>${usedCode}</div>`;
+          }).join('');
+          return `<details class="history-details"><summary><strong>${keyEntries.length} lượt</strong><small>Mới nhất: ${escapeHtml(latestDate)}</small></summary><div class="history-list">${entries}</div></details>`;
+        })()
+        : '<span class="tag unlinked">Chưa có lịch sử</span>';
+      return `<tr data-udid="${escapeHtml(device.udid || '')}">
         <td data-label="Mã riêng" class="mono-cell">${code ? `<span class="tag linked">${escapeHtml(code)}</span>` : '<span class="tag unlinked">chưa cấp mã</span>'}</td>
         <td data-label="UDID" class="mono-cell">${escapeHtml(device.udid || '—')}</td>
         <td data-label="Key liên kết">${device.linkedKey ? `<span class="tag linked">${escapeHtml(device.linkedKey)}</span>` : `<span class="tag unlinked">chưa liên kết</span>`}</td>
@@ -2304,6 +2326,9 @@ async function loadDeviceCodes() {
         <td data-label="Thời gian cấp mã">${issuedAt ? new Date(issuedAt).toLocaleString('vi-VN') : '—'}</td>
       </tr>`;
     }).join('')}</tbody></table>`;
+    wrap.querySelectorAll('#deviceCodesTable tbody tr[data-udid]').forEach(row => {
+      if (openHistoryFor.has(row.dataset.udid)) row.querySelector('.history-details')?.setAttribute('open', '');
+    });
     filterTable('deviceCodesTable', 'deviceCodesSearch', true);
   } catch (error) {
     console.error('Không thể tải danh sách mã thiết bị:', error);
@@ -2328,7 +2353,7 @@ setInterval(() => {
 }, 2000);
 setInterval(() => {
   if (activeTab === 'device-codes' && !document.hidden) loadDeviceCodes();
-}, 2000);
+}, 10000);
 setInterval(() => {
   if (activeTab === 'keys' && !document.hidden) loadAllKeys();
 }, 10000);

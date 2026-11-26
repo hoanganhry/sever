@@ -1202,7 +1202,7 @@ app.get('/api/list-keys', async (req, res) => {
           device_id: session.device_id,
           package_id: session.package_id || null,
           last_seen: session.last_seen || null,
-          is_online: !isKeyDisabled(key) && !isKeyExpired(key, now) &&
+          is_online: session.is_active !== false && !isKeyDisabled(key) && !isKeyExpired(key, now) &&
             session.package_id === key.package_id &&
             now - new Date(session.last_seen).getTime() <= APP_ACTIVITY_TTL_MS
         }));
@@ -1360,7 +1360,8 @@ app.get('/api/app/packages', async (req, res) => {
 
 app.post('/api/app/check-package', async (req, res) => {
   try {
-    const { packageId, key } = req.body || {};
+    const { packageId, key, device_id: submittedDeviceId } = req.body || {};
+    const deviceId = typeof submittedDeviceId === 'string' ? submittedDeviceId.trim() : '';
     if (typeof packageId !== 'string' || !packageId.trim() ||
         typeof key !== 'string' || !key.trim()) {
       return res.status(400).json({ success: false, allowed: false, message: 'packageId and key are required' });
@@ -1392,6 +1393,14 @@ app.post('/api/app/check-package', async (req, res) => {
         allowed: false,
         code: 'KEY_DISABLED',
         message: 'This key has been disabled.'
+      });
+    }
+    if (deviceId && (!Array.isArray(license.devices) || !license.devices.includes(deviceId))) {
+      return res.json({
+        success: true,
+        allowed: false,
+        code: 'KEY_DEVICE_MISMATCH',
+        message: 'This key is not linked to this device.'
       });
     }
     if (signValue(license.key_code) !== license.signature) {
@@ -1833,6 +1842,7 @@ app.patch('/api/admin/keys/:keyCode', async (req, res) => {
     const keys = await loadKeys();
     const found = keys.find(key => key.key_code === keyCode);
     if (!found) return res.status(404).json({ success: false, message: 'Không tìm thấy key' });
+    const previouslyDisabled = isKeyDisabled(found);
 
     const body = req.body || {};
     const has = field => Object.prototype.hasOwnProperty.call(body, field);
@@ -1843,6 +1853,16 @@ app.patch('/api/admin/keys/:keyCode', async (req, res) => {
         return res.status(400).json({ success: false, message: 'is_disabled phải là true hoặc false' });
       }
       found.is_disabled = body.is_disabled;
+      if (body.is_disabled && !previouslyDisabled) {
+        found.last_verified = null;
+      }
+      if (body.is_disabled && !previouslyDisabled && Array.isArray(found.app_sessions)) {
+        const disabledAt = new Date().toISOString();
+        found.app_sessions.forEach(session => {
+          session.is_active = false;
+          session.last_seen = disabledAt;
+        });
+      }
       updatedFields.push('is_disabled');
     }
 
@@ -1912,7 +1932,19 @@ app.patch('/api/admin/keys/:keyCode', async (req, res) => {
       return res.status(500).json({ success: false, message: 'Không thể lưu thay đổi key' });
     }
 
-    await logActivity('update_key', 'public', 'public', { keyCode, fields: updatedFields });
+    const disabledChanged = updatedFields.includes('is_disabled') && found.is_disabled !== previouslyDisabled;
+    const changedFields = updatedFields.filter(field => field !== 'is_disabled');
+    if (disabledChanged) {
+      await logActivity(
+        found.is_disabled ? 'disable_key' : 'enable_key',
+        'admin',
+        'admin',
+        { keyCode }
+      );
+    }
+    if (changedFields.length) {
+      await logActivity('update_key', 'admin', 'admin', { keyCode, fields: changedFields });
+    }
     res.json({ success: true, message: 'Cập nhật key thành công', key: found });
   } catch (err) {
     console.error('Update key error:', err);
