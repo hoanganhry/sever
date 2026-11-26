@@ -81,7 +81,23 @@ function updateRecordByUdid(udid, patch, session = null) {
 }
 
 function linkDeviceToKey(udid, key) {
-  return updateRecordByUdid(udid, { linkedKey: key, linkedAt: new Date().toISOString() });
+  const existing = [...mergeDuplicateUdids(loadRecords())].reverse().find(record => record.udid === udid);
+  if (!existing) return null;
+
+  let deviceCode = existing.deviceCode;
+  if (!deviceCode) {
+    const usedCodes = new Set(loadRecords().map(record => record.deviceCode).filter(Boolean));
+    do {
+      const rawCode = crypto.randomBytes(8).toString('hex').toUpperCase();
+      deviceCode = rawCode.match(/.{1,4}/g).join('-');
+    } while (usedCodes.has(deviceCode));
+  }
+
+  return updateRecordByUdid(udid, {
+    linkedKey: key,
+    linkedAt: new Date().toISOString(),
+    deviceCode
+  });
 }
 
 function pruneGetKeyFlows() {

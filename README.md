@@ -48,6 +48,10 @@ Optional AI provider credentials:
 
 AI features remain unavailable when their provider credential is not configured.
 
+## Per-device login code
+
+On a successful `POST /api/verify-key`, the server returns `device_code` for a captured UDID. It creates a cryptographically random code once, saves it in that UDID's record, and returns the same code on later logins. The app stores it in Keychain and shows it after login. Keep `udid_log.json` in the persistent `DATA_DIR` so device codes survive server restarts.
+
 ## App package checks
 
 Create and manage app packages in the dashboard's **Gói ứng dụng** tab after signing in with the private dashboard username and password. Package-management APIs require the same credentials; public app package lookup remains available to client apps. Assign each license key to its intended package when creating the key. The app can start a Get Key registration with `POST /api/udid/start` and JSON `{ "key": "<issued-key>", "packageId": "<package-id>" }`. On success, open the returned `registrationUrl` in Safari. The URL uses the friendly `/get-key` path and contains a random, one-time flow token, not the key; the flow expires after 10 minutes. The page installs the UDID profile, then verifies and links the key to that device automatically. Successful `POST /api/verify-key` calls also link any previously captured UDID to the verified key. Duplicate captures of the same UDID are consolidated into one device record. On iPhone/iPad the page captures the actual UDID. The key list shows captured model and iOS details when available. The app should call `POST /api/app/check-package` with its package ID and key when it starts and periodically while running. It must send that same package ID to `POST /api/verify-key`.

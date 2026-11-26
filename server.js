@@ -2206,6 +2206,7 @@ app.post('/api/verify-key', async (req, res) => {
     await saveKeys(keys);
     const registeredDevice = udidRouter.linkDeviceToKey(device_id, found.key_code);
 
+    res.set('Cache-Control', 'no-store');
     res.json({ 
       success: true, 
       message: 'Xác thực thành công', 
@@ -2213,6 +2214,7 @@ app.post('/api/verify-key', async (req, res) => {
       expires_at: found.expires_at,
       device_id,
       device_linked: Boolean(registeredDevice),
+      device_code: registeredDevice?.deviceCode || null,
       devices_remaining: found.allowed_devices - found.devices.length
     });
   } catch(err) {
