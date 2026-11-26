@@ -2279,10 +2279,9 @@ async function loadDeviceCodes() {
     }
 
     wrap.innerHTML = `<table id="deviceCodesTable"><thead><tr>
-      <th>Mã riêng</th><th>UDID</th><th>Key liên kết</th><th>Model</th><th>iOS</th><th>Thời gian cấp mã</th><th>Trạng thái</th><th>Thao tác</th>
+      <th>Mã riêng</th><th>UDID</th><th>Key liên kết</th><th>Model</th><th>iOS</th><th>Thời gian cấp mã</th>
     </tr></thead><tbody>${devices.map(device => {
       const code = typeof device.deviceCode === 'string' ? device.deviceCode : '';
-      const disabled = device.deviceCodeDisabled === true;
       const issuedAt = device.deviceCodeCreatedAt || (code ? device.linkedAt : null);
       return `<tr>
         <td data-label="Mã riêng" class="mono-cell">${code ? `<span class="tag linked">${escapeHtml(code)}</span>` : '<span class="tag unlinked">chưa cấp mã</span>'}</td>
@@ -2291,8 +2290,6 @@ async function loadDeviceCodes() {
         <td data-label="Model">${escapeHtml(device.product || '—')}</td>
         <td data-label="iOS">${escapeHtml(device.version || '—')}</td>
         <td data-label="Thời gian cấp mã">${issuedAt ? new Date(issuedAt).toLocaleString('vi-VN') : '—'}</td>
-        <td data-label="Trạng thái">${!code ? '<span class="tag unlinked">chưa cấp mã</span>' : disabled ? '<span class="tag unlinked">đã tắt</span>' : '<span class="tag linked">đang bật</span>'}</td>
-        <td data-label="Thao tác">${code ? `<button class="btn secondary" type="button" data-code="${escapeHtml(code)}" data-disabled="${disabled ? 'false' : 'true'}" onclick="setDeviceCodeStatus(this.dataset.code,this.dataset.disabled==='true')">${disabled ? 'Bật mã' : 'Tắt mã'}</button>` : '—'}</td>
       </tr>`;
     }).join('')}</tbody></table>`;
     filterTable('deviceCodesTable', 'deviceCodesSearch', true);
@@ -2303,18 +2300,6 @@ async function loadDeviceCodes() {
   } finally {
     deviceCodesLoading = false;
   }
-}
-
-async function setDeviceCodeStatus(deviceCode, disabled) {
-  const { ok, data } = await api('/api/udid/code-status', {
-    method: 'POST',
-    body: JSON.stringify({ deviceCode, disabled })
-  });
-  if (!ok || !data.success) {
-    alert('Không cập nhật được trạng thái mã thiết bị. Hãy thử lại.');
-    return;
-  }
-  await loadDeviceCodes();
 }
 
 /* ---------- init ---------- */
