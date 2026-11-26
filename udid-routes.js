@@ -84,6 +84,7 @@ function linkDeviceToKey(udid, key) {
   const existing = [...mergeDuplicateUdids(loadRecords())].reverse().find(record => record.udid === udid);
   if (!existing) return null;
 
+  const now = new Date().toISOString();
   let deviceCode = existing.deviceCode;
   if (!deviceCode) {
     const usedCodes = new Set(loadRecords().map(record => record.deviceCode).filter(Boolean));
@@ -95,8 +96,9 @@ function linkDeviceToKey(udid, key) {
 
   return updateRecordByUdid(udid, {
     linkedKey: key,
-    linkedAt: new Date().toISOString(),
-    deviceCode
+    linkedAt: now,
+    deviceCode,
+    deviceCodeCreatedAt: existing.deviceCodeCreatedAt || (existing.deviceCode ? existing.linkedAt : now)
   });
 }
 

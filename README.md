@@ -50,7 +50,7 @@ AI features remain unavailable when their provider credential is not configured.
 
 ## Per-device login code
 
-On a successful `POST /api/verify-key`, the server returns `device_code` for a captured UDID. It creates a cryptographically random code once, saves it in that UDID's record, and returns the same code on later logins. The app stores it in Keychain and shows it after login. Keep `udid_log.json` in the persistent `DATA_DIR` so device codes survive server restarts.
+On a successful `POST /api/verify-key`, the server returns `device_code` for a captured UDID. It creates a cryptographically random code once, saves it in that UDID's record, and returns the same code on later logins. The app stores it in Keychain and shows it above the game picker. The dashboard's **Quản lý mã thiết bị** tab lists each code with its UDID, linked key, model, iOS version, and issue time. Keep `udid_log.json` in the persistent `DATA_DIR` so device codes survive server restarts.
 
 ## App package checks
 

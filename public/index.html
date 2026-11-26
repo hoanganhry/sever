@@ -522,6 +522,10 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M11 18h2"/></svg>
       Danh sách thiết bị
     </button>
+    <button data-tab="device-codes">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 10h3m-3 4h6m3-4h1"/></svg>
+      Quản lý mã thiết bị
+    </button>
   </nav>
 
   <!-- OVERVIEW -->
@@ -934,6 +938,28 @@
     </form>
   </div>
 
+  <!-- DEVICE CODES -->
+  <section class="tab-panel" id="tab-device-codes" style="display:none;">
+    <div class="panel">
+      <h2>Quản lý mã thiết bị</h2>
+      <p style="color:var(--muted);margin:-8px 0 14px;">Mã riêng được cấp sau khi UDID đăng nhập thành công.</p>
+      <div class="table-toolbar">
+        <div class="toolbar-actions">
+          <button class="btn secondary" onclick="loadDeviceCodes()">⟳ Refresh</button>
+          <button class="btn secondary" onclick="exportTable('deviceCodesTable','ma-thiet-bi.csv')">⇩ Export</button>
+        </div>
+        <input class="table-search" id="deviceCodesSearch" type="search" placeholder="Tìm mã hoặc UDID..." oninput="filterTable('deviceCodesTable','deviceCodesSearch')">
+      </div>
+      <div id="deviceCodesTableWrap" class="table-wrap"></div>
+      <div class="table-footer">
+        <label>Rows per page: <select id="deviceCodesPageSize" onchange="setTablePageSize('deviceCodes')"><option>10</option><option>25</option><option>50</option></select></label>
+        <span id="deviceCodesPageInfo">0–0 of 0</span>
+        <button id="deviceCodesPrev" onclick="changeTablePage('deviceCodes',-1)" aria-label="Trang trước">‹</button>
+        <button id="deviceCodesNext" onclick="changeTablePage('deviceCodes',1)" aria-label="Trang sau">›</button>
+      </div>
+    </div>
+  </section>
+
   <!-- DEVICES / UDID -->
   <section class="tab-panel" id="tab-devices" style="display:none;">
     <div class="panel">
@@ -962,7 +988,7 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
-const tablePages = { keys: 1, devices: 1 };
+const tablePages = { keys: 1, devices: 1, deviceCodes: 1 };
 const selectedKeyCodes = new Set();
 const keyRecords = new Map();
 let packagesPage = 1;
@@ -996,6 +1022,7 @@ function switchTab(tab, createMode = 'single') {
   });
   if (tab === 'overview') loadOverview();
   if (tab === 'devices') loadUdidDevices();
+  if (tab === 'device-codes') loadDeviceCodes();
   if (tab === 'keys') loadAllKeys();
   if (tab === 'packages') loadPackages();
 }
@@ -1553,9 +1580,9 @@ function escapeHtml(value) {
 }
 
 function filterTable(tableId, inputId, preservePage = false) {
+  const pageName = tableId === 'keysTable' ? 'keys' : tableId === 'deviceCodesTable' ? 'deviceCodes' : 'devices';
   const table = $(tableId);
   if (!table) {
-    const pageName = tableId === 'keysTable' ? 'keys' : 'devices';
     updateTablePage(pageName, [], 1);
     return;
   }
@@ -1566,7 +1593,6 @@ function filterTable(tableId, inputId, preservePage = false) {
     searchableRow.querySelectorAll('.key-menu').forEach(menu => menu.remove());
     row.dataset.filteredOut = String(!searchableRow.textContent.toLocaleLowerCase('vi').includes(query));
   });
-  const pageName = tableId === 'keysTable' ? 'keys' : 'devices';
   if (!preservePage) tablePages[pageName] = 1;
   renderTablePage(pageName, rows);
 }
@@ -2230,14 +2256,66 @@ async function loadUdidDevices() {
   }
 }
 
+/* ---------- device codes ---------- */
+let deviceCodesLoading = false;
+
+async function loadDeviceCodes() {
+  if (deviceCodesLoading) return;
+  deviceCodesLoading = true;
+  const wrap = $('deviceCodesTableWrap');
+  try {
+    const { ok, data } = await api('/api/udid/list');
+    if (!ok || !data.success) {
+      wrap.innerHTML = '<div class="empty-state">Không tải được danh sách mã thiết bị.</div>';
+      resetTablePage('deviceCodes');
+      return;
+    }
+
+    const devices = Array.isArray(data.devices) ? data.devices : [];
+    if (devices.length === 0) {
+      wrap.innerHTML = '<div class="empty-state">Chưa có UDID nào được ghi nhận.</div>';
+      resetTablePage('deviceCodes');
+      return;
+    }
+
+    wrap.innerHTML = `<table id="deviceCodesTable"><thead><tr>
+      <th>Mã riêng</th><th>UDID</th><th>Key liên kết</th><th>Model</th><th>iOS</th><th>Thời gian cấp mã</th>
+    </tr></thead><tbody>${devices.map(device => {
+      const code = typeof device.deviceCode === 'string' ? device.deviceCode : '';
+      const issuedAt = device.deviceCodeCreatedAt || (code ? device.linkedAt : null);
+      return `<tr>
+        <td data-label="Mã riêng" class="mono-cell">${code ? `<span class="tag linked">${escapeHtml(code)}</span>` : '<span class="tag unlinked">chưa cấp mã</span>'}</td>
+        <td data-label="UDID" class="mono-cell">${escapeHtml(device.udid || '—')}</td>
+        <td data-label="Key liên kết">${device.linkedKey ? `<span class="tag linked">${escapeHtml(device.linkedKey)}</span>` : `<span class="tag unlinked">chưa liên kết</span>`}</td>
+        <td data-label="Model">${escapeHtml(device.product || '—')}</td>
+        <td data-label="iOS">${escapeHtml(device.version || '—')}</td>
+        <td data-label="Thời gian cấp mã">${issuedAt ? new Date(issuedAt).toLocaleString('vi-VN') : '—'}</td>
+      </tr>`;
+    }).join('')}</tbody></table>`;
+    filterTable('deviceCodesTable', 'deviceCodesSearch', true);
+  } catch (error) {
+    console.error('Không thể tải danh sách mã thiết bị:', error);
+    wrap.innerHTML = '<div class="empty-state">Lỗi kết nối khi tải danh sách mã thiết bị.</div>';
+    resetTablePage('deviceCodes');
+  } finally {
+    deviceCodesLoading = false;
+  }
+}
+
 /* ---------- init ---------- */
 loadOverview();
 if (new URLSearchParams(window.location.search).get('tab') === 'devices') {
   switchTab('devices');
 }
+if (new URLSearchParams(window.location.search).get('tab') === 'device-codes') {
+  switchTab('device-codes');
+}
 setInterval(loadOverview, 30000);
 setInterval(() => {
   if (activeTab === 'devices' && !document.hidden) loadUdidDevices();
+}, 2000);
+setInterval(() => {
+  if (activeTab === 'device-codes' && !document.hidden) loadDeviceCodes();
 }, 2000);
 setInterval(() => {
   if (activeTab === 'keys' && !document.hidden) loadAllKeys();
