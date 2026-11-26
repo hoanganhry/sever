@@ -2286,11 +2286,12 @@ async function loadDeviceCodes() {
       const keyEntries = Array.isArray(device.keyEntries) ? [...device.keyEntries].reverse() : [];
       const keyEntryHistory = keyEntries.length
         ? keyEntries.map(entry => {
-          const place = entry.entrypoint === 'home' ? 'Trang ch\u1ee7' : 'Thi\u1ebft l\u1eadp';
+          const place = entry.entrypoint === 'home' ? 'Home' : entry.entrypoint === 'menu' ? 'In-game menu' : 'Setup';
           const date = entry.verifiedAt && Number.isFinite(new Date(entry.verifiedAt).getTime())
             ? new Date(entry.verifiedAt).toLocaleString('vi-VN')
             : '\u2014';
-          return escapeHtml(entry.key || '\u2014') + ' \u00b7 ' + escapeHtml(entry.source || 'PatchPro') + ' \u00b7 ' + place + ' \u00b7 ' + escapeHtml(date);
+          const usedCode = entry.deviceCode ? ' · Device code: ' + escapeHtml(entry.deviceCode) : '';
+          return escapeHtml(entry.key || '\u2014') + ' \u00b7 ' + escapeHtml(entry.source || 'PatchPro') + ' \u00b7 ' + place + ' \u00b7 ' + escapeHtml(date) + usedCode;
         }).join('<br>')
         : 'Ch\u01b0a c\u00f3 l\u01b0\u1ee3t nh\u1eadp t\u1eeb PatchPro';
       return `<tr>

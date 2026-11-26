@@ -124,6 +124,28 @@ function linkDeviceToKey(udid, key, verification = null) {
   });
 }
 
+function recordDeviceCodeUse(udid, deviceCode, verification = null) {
+  const existing = [...mergeDuplicateUdids(loadRecords())]
+    .reverse()
+    .find(record => record.udid === udid && record.deviceCode === deviceCode);
+  if (!existing || !verification || verification.packageId !== 'PatchPro') return null;
+
+  const now = new Date().toISOString();
+  const keyEntries = Array.isArray(existing.keyEntries) ? [...existing.keyEntries] : [];
+  keyEntries.push({
+    key: existing.linkedKey || '',
+    packageId: verification.packageId,
+    source: 'PatchPro Menu',
+    entrypoint: 'menu',
+    deviceCode,
+    verifiedAt: verification.verifiedAt || now
+  });
+  return updateRecordByUdid(udid, {
+    keyEntries: keyEntries.slice(-100),
+    lastDeviceCodeUseAt: verification.verifiedAt || now
+  });
+}
+
 function pruneGetKeyFlows() {
   const now = Date.now();
   for (const [flowId, flow] of getKeyFlows) {
@@ -376,6 +398,7 @@ module.exports = function udidRoutes(publicBaseUrl, getUdidPageUrl) {
 
   router.getDeviceRecords = () => mergeDuplicateUdids(loadRecords()).filter(record => record.udid);
   router.linkDeviceToKey = linkDeviceToKey;
+  router.recordDeviceCodeUse = recordDeviceCodeUse;
   router.createGetKeyFlow = createGetKeyFlow;
   router.getGetKeyFlow = getGetKeyFlow;
 

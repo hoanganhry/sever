@@ -2237,6 +2237,59 @@ app.post('/api/verify-key', async (req, res) => {
   }
 });
 
+app.post('/api/verify-device-code', async (req, res) => {
+  try {
+    const submittedCode = typeof req.body?.device_code === 'string'
+      ? req.body.device_code.trim().toUpperCase()
+      : '';
+    const deviceCode = submittedCode.replace(/\s+/g, '');
+    const packageId = typeof req.body?.packageId === 'string' ? req.body.packageId.trim() : '';
+    const entrypoint = typeof req.body?.entrypoint === 'string' ? req.body.entrypoint.trim() : '';
+
+    if (!/^[A-F0-9]{4}(?:-[A-F0-9]{4}){3}$/.test(deviceCode) || packageId !== 'PatchPro') {
+      return res.status(400).json({ success: false, message: 'Device code or PatchPro package is invalid.' });
+    }
+
+    const device = udidRouter.getDeviceRecords().find(record => record.deviceCode === deviceCode);
+    if (!device?.udid || !device.linkedKey) {
+      return res.status(403).json({ success: false, message: 'Device code is not linked to a registered UDID and key.' });
+    }
+
+    const keys = await loadKeys();
+    const key = keys.find(record => record.key_code === device.linkedKey);
+    if (!key || isKeyDisabled(key) || isKeyExpired(key) || key.package_id !== packageId) {
+      return res.status(403).json({ success: false, message: 'Linked key is disabled, expired, or not assigned to PatchPro.' });
+    }
+
+    const appPackage = (await loadPackages()).find(record => record.id === packageId && record.enabled);
+    if (!appPackage) {
+      return res.status(403).json({ success: false, message: 'PatchPro package is disabled.' });
+    }
+
+    const keyDevices = Array.isArray(key.devices) ? key.devices : [];
+    if (!keyDevices.includes(device.udid)) {
+      return res.status(403).json({ success: false, message: 'UDID is no longer linked to this key.' });
+    }
+
+    const verifiedAt = new Date().toISOString();
+    if (entrypoint === 'menu') {
+      udidRouter.recordDeviceCodeUse(device.udid, deviceCode, { packageId, verifiedAt });
+    }
+    res.set('Cache-Control', 'no-store');
+    res.json({
+      success: true,
+      message: 'Device code accepted.',
+      udid: device.udid,
+      key: key.key_code,
+      packageId,
+      verifiedAt
+    });
+  } catch (error) {
+    console.error('Device code verification error:', error);
+    res.status(500).json({ success: false, message: 'Could not verify device code.' });
+  }
+});
+
 app.post('/api/key-info', async (req, res) => {
   try {
     const submittedKey = req.body?.key;
