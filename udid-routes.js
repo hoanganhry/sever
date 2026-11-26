@@ -13,6 +13,7 @@ const path = require('path');
 const router = express.Router();
 const GET_KEY_FLOW_TTL_MS = 10 * 60 * 1000;
 const getKeyFlows = new Map();
+const deviceCodeAttempts = new Map();
 const failedSessions = new Map(); // session -> lý do lỗi (chỉ để báo cho trang)
 
 // Dùng cùng DATA_DIR với server.js để dữ liệu nằm trên Persistent Disk (nếu có)
@@ -98,8 +99,36 @@ function linkDeviceToKey(udid, key) {
     linkedKey: key,
     linkedAt: now,
     deviceCode,
+    deviceCodeDisabled: existing.deviceCodeDisabled === true,
     deviceCodeCreatedAt: existing.deviceCodeCreatedAt || (existing.deviceCode ? existing.linkedAt : now)
   });
+}
+
+function allowDeviceCodeAttempt(ip) {
+  const now = Date.now();
+  const key = String(ip || 'unknown');
+  const attempt = deviceCodeAttempts.get(key) || { count: 0, resetAt: now + 60_000 };
+  if (attempt.resetAt <= now) {
+    attempt.count = 0;
+    attempt.resetAt = now + 60_000;
+  }
+  attempt.count++;
+  deviceCodeAttempts.set(key, attempt);
+  return attempt.count <= 120;
+}
+
+function setDeviceCodeDisabled(deviceCode, disabled) {
+  const records = mergeDuplicateUdids(loadRecords());
+  let updated = null;
+  for (const record of records) {
+    if (record.deviceCode !== deviceCode) continue;
+    record.deviceCodeDisabled = disabled;
+    record.deviceCodeStatusChangedAt = new Date().toISOString();
+    updated = record;
+  }
+  if (!updated) return null;
+  fs.writeFileSync(DB_FILE, JSON.stringify(records, null, 2));
+  return updated;
 }
 
 function pruneGetKeyFlows() {
@@ -292,6 +321,38 @@ module.exports = function udidRoutes(publicBaseUrl, getUdidPageUrl) {
     }
     const latest = records[records.length - 1];
     res.json({ success: true, found: true, linked: true, key: latest.linkedKey, linkedAt: latest.linkedAt });
+  });
+
+  router.post('/api/udid/verify-device-code', express.urlencoded({ extended: false }), (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    if (!allowDeviceCodeAttempt(req.ip)) {
+      return res.status(429).json({ success: false, valid: false, message: 'too_many_attempts' });
+    }
+    const code = typeof req.body?.code === 'string' ? req.body.code.trim().toUpperCase() : '';
+    if (!/^[A-F0-9]{4}(?:-[A-F0-9]{4}){3}$/.test(code)) {
+      return res.status(400).json({ success: false, valid: false, message: 'invalid_or_disabled' });
+    }
+    const record = mergeDuplicateUdids(loadRecords()).find(item => item.deviceCode === code);
+    if (!record || record.deviceCodeDisabled === true) {
+      return res.status(403).json({ success: false, valid: false, message: 'invalid_or_disabled' });
+    }
+    return res.json({ success: true, valid: true, lease_seconds: 30 });
+  });
+
+  router.post('/api/udid/code-status', express.json(), (req, res) => {
+    const code = typeof req.body?.deviceCode === 'string' ? req.body.deviceCode.trim().toUpperCase() : '';
+    const disabled = req.body?.disabled;
+    if (!/^[A-F0-9]{4}(?:-[A-F0-9]{4}){3}$/.test(code) || typeof disabled !== 'boolean') {
+      return res.status(400).json({ success: false, message: 'invalid_device_code_status' });
+    }
+    const record = setDeviceCodeDisabled(code, disabled);
+    if (!record) return res.status(404).json({ success: false, message: 'device_code_not_found' });
+    return res.json({
+      success: true,
+      deviceCode: record.deviceCode,
+      disabled: record.deviceCodeDisabled === true,
+      changedAt: record.deviceCodeStatusChangedAt || null
+    });
   });
 
   router.get('/api/udid/flow', (req, res) => {

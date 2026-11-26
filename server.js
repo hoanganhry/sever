@@ -30,7 +30,8 @@ const DASHBOARD_PROTECTED_PATHS = new Set([
   '/api/delete-key',
   '/api/delete-keys',
   '/api/delete-expired-keys',
-  '/api/udid/list'
+  '/api/udid/list',
+  '/api/udid/code-status'
 ]);
 
 function requiresDashboardAuth(req) {
