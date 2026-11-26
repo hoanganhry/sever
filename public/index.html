@@ -2279,14 +2279,25 @@ async function loadDeviceCodes() {
     }
 
     wrap.innerHTML = `<table id="deviceCodesTable"><thead><tr>
-      <th>Mã riêng</th><th>UDID</th><th>Key liên kết</th><th>Model</th><th>iOS</th><th>Thời gian cấp mã</th>
+      <th>Mã riêng</th><th>UDID</th><th>Key liên kết</th><th>L&#x1ECB;ch s&#x1EED; nh&#x1EAD;p t&#x1EEB; PatchPro</th><th>Model</th><th>iOS</th><th>Thời gian cấp mã</th>
     </tr></thead><tbody>${devices.map(device => {
       const code = typeof device.deviceCode === 'string' ? device.deviceCode : '';
       const issuedAt = device.deviceCodeCreatedAt || (code ? device.linkedAt : null);
+      const keyEntries = Array.isArray(device.keyEntries) ? [...device.keyEntries].reverse() : [];
+      const keyEntryHistory = keyEntries.length
+        ? keyEntries.map(entry => {
+          const place = entry.entrypoint === 'home' ? 'Trang ch\u1ee7' : 'Thi\u1ebft l\u1eadp';
+          const date = entry.verifiedAt && Number.isFinite(new Date(entry.verifiedAt).getTime())
+            ? new Date(entry.verifiedAt).toLocaleString('vi-VN')
+            : '\u2014';
+          return escapeHtml(entry.key || '\u2014') + ' \u00b7 ' + escapeHtml(entry.source || 'PatchPro') + ' \u00b7 ' + place + ' \u00b7 ' + escapeHtml(date);
+        }).join('<br>')
+        : 'Ch\u01b0a c\u00f3 l\u01b0\u1ee3t nh\u1eadp t\u1eeb PatchPro';
       return `<tr>
         <td data-label="Mã riêng" class="mono-cell">${code ? `<span class="tag linked">${escapeHtml(code)}</span>` : '<span class="tag unlinked">chưa cấp mã</span>'}</td>
         <td data-label="UDID" class="mono-cell">${escapeHtml(device.udid || '—')}</td>
         <td data-label="Key liên kết">${device.linkedKey ? `<span class="tag linked">${escapeHtml(device.linkedKey)}</span>` : `<span class="tag unlinked">chưa liên kết</span>`}</td>
+        <td data-label="L&#x1ECB;ch s&#x1EED; nh&#x1EAD;p t&#x1EEB; PatchPro">${keyEntryHistory}</td>
         <td data-label="Model">${escapeHtml(device.product || '—')}</td>
         <td data-label="iOS">${escapeHtml(device.version || '—')}</td>
         <td data-label="Thời gian cấp mã">${issuedAt ? new Date(issuedAt).toLocaleString('vi-VN') : '—'}</td>

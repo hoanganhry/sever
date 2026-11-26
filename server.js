@@ -2204,7 +2204,17 @@ app.post('/api/verify-key', async (req, res) => {
       found.app_sessions = sessions.slice(-100);
     }
     await saveKeys(keys);
-    const registeredDevice = udidRouter.linkDeviceToKey(device_id, found.key_code);
+    const entrypoint = ['home', 'onboarding'].includes(req.body?.entrypoint)
+      ? req.body.entrypoint
+      : null;
+    const verificationSource = packageId === 'PatchPro' && entrypoint
+      ? { source: 'PatchPro', packageId, entrypoint, verifiedAt: found.last_verified }
+      : null;
+    const registeredDevice = udidRouter.linkDeviceToKey(
+      device_id,
+      found.key_code,
+      verificationSource
+    );
 
     res.set('Cache-Control', 'no-store');
     res.json({ 

@@ -44,7 +44,10 @@ function mergeDuplicateUdids(records) {
       ...existing,
       ...record,
       linkedKey: record.linkedKey || existing.linkedKey,
-      linkedAt: record.linkedAt || existing.linkedAt
+      linkedAt: record.linkedAt || existing.linkedAt,
+      deviceCode: record.deviceCode || existing.deviceCode,
+      deviceCodeCreatedAt: record.deviceCodeCreatedAt || existing.deviceCodeCreatedAt,
+      keyEntries: record.keyEntries || existing.keyEntries
     };
   });
   return merged;
@@ -57,6 +60,9 @@ async function saveRecord(record) {
     if (previous) {
       record.linkedKey = previous.linkedKey || record.linkedKey;
       record.linkedAt = previous.linkedAt || record.linkedAt;
+      record.deviceCode = previous.deviceCode || record.deviceCode;
+      record.deviceCodeCreatedAt = previous.deviceCodeCreatedAt || record.deviceCodeCreatedAt;
+      record.keyEntries = previous.keyEntries || record.keyEntries;
     }
     records = records.filter(item => item.udid !== record.udid);
   }
@@ -80,7 +86,7 @@ function updateRecordByUdid(udid, patch, session = null) {
   return null;
 }
 
-function linkDeviceToKey(udid, key) {
+function linkDeviceToKey(udid, key, verification = null) {
   const existing = [...mergeDuplicateUdids(loadRecords())].reverse().find(record => record.udid === udid);
   if (!existing) return null;
 
@@ -94,11 +100,27 @@ function linkDeviceToKey(udid, key) {
     } while (usedCodes.has(deviceCode));
   }
 
+  const keyEntries = Array.isArray(existing.keyEntries) ? [...existing.keyEntries] : [];
+  if (
+    verification &&
+    verification.source === 'PatchPro' &&
+    ['home', 'onboarding'].includes(verification.entrypoint)
+  ) {
+    keyEntries.push({
+      key,
+      packageId: verification.packageId,
+      source: 'PatchPro',
+      entrypoint: verification.entrypoint,
+      verifiedAt: verification.verifiedAt || now
+    });
+  }
+
   return updateRecordByUdid(udid, {
     linkedKey: key,
     linkedAt: now,
     deviceCode,
-    deviceCodeCreatedAt: existing.deviceCodeCreatedAt || (existing.deviceCode ? existing.linkedAt : now)
+    deviceCodeCreatedAt: existing.deviceCodeCreatedAt || (existing.deviceCode ? existing.linkedAt : now),
+    keyEntries: keyEntries.slice(-100)
   });
 }
 
