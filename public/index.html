@@ -355,12 +355,6 @@
   .tag.linked{color:#6468ee; background:#f0f0ff; border-color:#dedfff;}
   .tag.unlinked{color:#8e97a8; background:#f5f6f8; border-color:#eceef2;}
   .empty-state{border:0; color:#929bad; padding:46px 20px;}
-  #keysTable td[data-label="Thiết bị đã dùng"]{width:230px; max-width:230px; vertical-align:top;}
-  .key-device-list{max-height:132px; overflow-y:auto; overflow-x:hidden; display:grid; gap:5px; padding:1px 3px 1px 0;}
-  .key-device-item{min-width:0; padding:6px 8px; border:1px solid #edf0f5; border-radius:5px; background:#fafbfe;}
-  .key-device-udid{display:block; min-width:0; color:#596477; font:10px var(--mono); overflow-wrap:anywhere; word-break:break-all;}
-  .key-device-item small{display:block; margin-top:3px; color:#929bad; font:10px/1.35 var(--sans); overflow-wrap:anywhere;}
-  .key-device-count{display:block; margin-bottom:5px; color:#9099aa; font:10px var(--sans);}
   .link-cta{background:#fff; border-color:#e8eaf0; border-radius:8px;}
   .link-cta div p{color:#929bad;}
   .link-cta div strong{color:#596477;}
@@ -718,7 +712,7 @@
         <div class="pkg-dialog-foot">
           <div class="grp">
             <button class="btn secondary" type="button" id="pkgEditToggle" onclick="togglePackageFromModal()"></button>
-            <button class="btn secondary pkg-delete" type="button" id="pkgDeleteButton" onclick="deletePackage()">Xóa gói</button>
+            <button class="btn secondary pkg-delete" type="button" onclick="deletePackage()">Xóa gói</button>
           </div>
           <div class="grp">
             <button class="btn secondary" type="button" onclick="closePackageEdit()">Đóng</button>
@@ -1019,7 +1013,6 @@ const packageColumns = [
   ['actions', '']
 ];
 const packageRecords = new Map();
-const FIXED_APP_PACKAGE_ID = 'PatchPro';
 let editingPackageId = null;
 const visiblePackageColumns = new Set(packageColumns.map(([id]) => id));
 
@@ -1430,8 +1423,6 @@ function fillPackageEdit(appPackage) {
   $('pkgEditTitle').textContent = appPackage.name || 'Chỉnh sửa gói';
   $('pkgEditId').textContent = appPackage.id;
   $('pkgEditName').value = appPackage.name || '';
-  $('pkgEditName').disabled = appPackage.id === FIXED_APP_PACKAGE_ID;
-  $('pkgDeleteButton').hidden = appPackage.id === FIXED_APP_PACKAGE_ID;
   $('pkgEditMessage').value = appPackage.message || '';
   $('pkgEditUrl').value = appPackage.updateUrl || '';
   $('pkgEditCount').textContent = `${$('pkgEditMessage').value.length}/500`;
@@ -2179,15 +2170,9 @@ async function loadAllKeys() {
         const device = deviceDetails.get(uid);
         const description = [device?.product, device?.version ? `iOS ${device.version}` : null]
           .filter(Boolean).join(' · ');
-        const capturedDate = device?.capturedAt ? new Date(device.capturedAt) : null;
-        const capturedAt = capturedDate && Number.isFinite(capturedDate.getTime())
-          ? capturedDate.toLocaleString('vi-VN')
-          : '';
-        return `<div class="key-device-item"><span class="key-device-udid" title="${escapeHtml(uid)}">${escapeHtml(uid)}</span>${description ? `<small>${escapeHtml(description)}</small>` : ''}${capturedAt ? `<small>Nhận UDID: ${escapeHtml(capturedAt)}</small>` : ''}</div>`;
-      }).join('') : '';
-      const deviceSummaryHtml = deviceUids.length
-        ? `<div class="key-device-count">${deviceUids.length} thiết bị</div><div class="key-device-list">${deviceSummary}</div>`
-        : '—';
+        const capturedAt = device?.capturedAt ? new Date(device.capturedAt).toLocaleString('vi-VN') : '';
+        return `<div class="mono-cell">${escapeHtml(uid)}</div>${description ? `<small>${escapeHtml(description)}</small>` : ''}${capturedAt ? `<small>Nhận UDID: ${escapeHtml(capturedAt)}</small>` : ''}`;
+      }).join('') : '—';
       const appSessions = Array.isArray(k.app_sessions) ? k.app_sessions : [];
       const onlineSessions = appSessions.filter(session => session.is_online === true);
       const lastVerifiedAt = k.last_verified ? new Date(k.last_verified) : null;
@@ -2221,7 +2206,7 @@ async function loadAllKeys() {
             <button class="danger" type="button" data-key="${escapeHtml(k.key_code || '')}" onclick="handleKeyMenuAction(this.dataset.key,'delete')">Xóa key</button>
           </div>
         </div></div></td>
-        <td data-label="Thiết bị đã dùng">${deviceSummaryHtml}</td>
+        <td data-label="Thiết bị đã dùng">${deviceSummary}</td>
         <td data-label="App">${appStatus}</td>
         <td data-label="Ngày tạo">${createdAt}</td>
         <td data-label="Hết hạn">${k.is_permanent === true ? 'Vĩnh viễn' : Number.isNaN(expiresAt.getTime()) ? '—' : expiresAt.toLocaleDateString('vi-VN')}</td>

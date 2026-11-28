@@ -103,13 +103,13 @@ function linkDeviceToKey(udid, key, verification = null) {
   const keyEntries = Array.isArray(existing.keyEntries) ? [...existing.keyEntries] : [];
   if (
     verification &&
-    verification.source === fixedPackageId &&
+    verification.source === 'PatchPro' &&
     ['home', 'onboarding'].includes(verification.entrypoint)
   ) {
     keyEntries.push({
       key,
       packageId: verification.packageId,
-      source: fixedPackageId,
+      source: 'PatchPro',
       entrypoint: verification.entrypoint,
       verifiedAt: verification.verifiedAt || now
     });
@@ -128,14 +128,14 @@ function recordDeviceCodeUse(udid, deviceCode, verification = null) {
   const existing = [...mergeDuplicateUdids(loadRecords())]
     .reverse()
     .find(record => record.udid === udid && record.deviceCode === deviceCode);
-  if (!existing || !verification || verification.packageId !== fixedPackageId) return null;
+  if (!existing || !verification || verification.packageId !== 'PatchPro') return null;
 
   const now = new Date().toISOString();
   const keyEntries = Array.isArray(existing.keyEntries) ? [...existing.keyEntries] : [];
   keyEntries.push({
     key: existing.linkedKey || '',
     packageId: verification.packageId,
-    source: `${fixedPackageId} Menu`,
+    source: 'PatchPro Menu',
     entrypoint: 'menu',
     deviceCode,
     verifiedAt: verification.verifiedAt || now
@@ -209,7 +209,7 @@ function extractPlistFromBody(buf) {
   }
 }
 
-module.exports = function udidRoutes(publicBaseUrl, getUdidPageUrl, fixedPackageId, legacyPackageId) {
+module.exports = function udidRoutes(publicBaseUrl, getUdidPageUrl) {
   // Nếu bạn KHÔNG đặt PUBLIC_BASE_URL trên Render, tự suy ra từ request (ép https).
   function resolveBase(req) {
     if (process.env.PUBLIC_BASE_URL) return publicBaseUrl;
@@ -397,28 +397,6 @@ module.exports = function udidRoutes(publicBaseUrl, getUdidPageUrl, fixedPackage
   });
 
   router.getDeviceRecords = () => mergeDuplicateUdids(loadRecords()).filter(record => record.udid);
-  router.migratePackageId = (oldPackageId, newPackageId) => {
-    if (oldPackageId !== legacyPackageId) return;
-    const records = mergeDuplicateUdids(loadRecords());
-    let changed = false;
-    for (const record of records) {
-      if (!Array.isArray(record.keyEntries)) continue;
-      for (const entry of record.keyEntries) {
-        if (entry.packageId === oldPackageId) {
-          entry.packageId = newPackageId;
-          changed = true;
-        }
-        if (entry.source === oldPackageId) {
-          entry.source = newPackageId;
-          changed = true;
-        } else if (entry.source === `${oldPackageId} Menu`) {
-          entry.source = `${newPackageId} Menu`;
-          changed = true;
-        }
-      }
-    }
-    if (changed) fs.writeFileSync(DB_FILE, JSON.stringify(records, null, 2));
-  };
   router.linkDeviceToKey = linkDeviceToKey;
   router.recordDeviceCodeUse = recordDeviceCodeUse;
   router.createGetKeyFlow = createGetKeyFlow;

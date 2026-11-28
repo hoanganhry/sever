@@ -10,8 +10,6 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 
-const FIXED_APP_PACKAGE_ID = 'PatchPro';
-const LEGACY_APP_PACKAGE_ID = 'HoangXuanTu';
 const app = express();
 app.set('trust proxy', 1); // Render đứng sau proxy: để req.protocol/req.ip đúng
 const udidRoutes = require('./udid-routes');
@@ -84,7 +82,7 @@ function dashboardPasswordAuth(req, res, next) {
   res.status(401).send('Tên đăng nhập hoặc mật khẩu quản trị không đúng.');
 }
 
-const udidRouter = udidRoutes(PUBLIC_BASE_URL, GET_UDID_PAGE_URL, FIXED_APP_PACKAGE_ID, LEGACY_APP_PACKAGE_ID);
+const udidRouter = udidRoutes(PUBLIC_BASE_URL, GET_UDID_PAGE_URL);
 app.use(cors());
 app.options('*', cors());
 app.use(dashboardPasswordAuth);
@@ -461,9 +459,6 @@ async function initializeFiles() {
       await safeSaveJSON(CONFIG_FILE, cfg);
       console.log('✅ Initialized config.json');
     }
-
-    await ensureFixedAppPackage();
-    udidRouter.migratePackageId(LEGACY_APP_PACKAGE_ID, FIXED_APP_PACKAGE_ID);
   } catch (err) {
     console.error('❌ Initialization error:', err);
     throw err;
@@ -1324,54 +1319,6 @@ function loadPackages() {
   return safeLoadJSON(PACKAGES_FILE, []);
 }
 
-async function ensureFixedAppPackage() {
-  const packages = await loadPackages();
-  if (!Array.isArray(packages)) {
-    throw new Error('packages.json must contain an array');
-  }
-
-  const existingPackage = packages.find(item => item.id === FIXED_APP_PACKAGE_ID);
-  const legacyPackage = packages.find(item => item.id === LEGACY_APP_PACKAGE_ID);
-  const fixedPackage = {
-    ...(existingPackage || legacyPackage || {}),
-    id: FIXED_APP_PACKAGE_ID,
-    name: FIXED_APP_PACKAGE_ID,
-    enabled: existingPackage?.enabled ?? legacyPackage?.enabled ?? true,
-    message: existingPackage?.message ?? legacyPackage?.message ?? '',
-    updateUrl: existingPackage?.updateUrl ?? legacyPackage?.updateUrl ?? '',
-    created_at: existingPackage?.created_at ?? legacyPackage?.created_at ?? new Date().toISOString(),
-    updated_at: existingPackage?.updated_at ?? legacyPackage?.updated_at ?? new Date().toISOString()
-  };
-  const normalizedPackages = packages.filter(item =>
-    item.id !== FIXED_APP_PACKAGE_ID && item.id !== LEGACY_APP_PACKAGE_ID
-  );
-  normalizedPackages.push(fixedPackage);
-
-  if (!await savePackages(normalizedPackages)) {
-    throw new Error(`Unable to initialize the fixed ${FIXED_APP_PACKAGE_ID} package`);
-  }
-
-  const keys = await loadKeys();
-  let keysChanged = false;
-  for (const key of keys) {
-    if (key.package_id === LEGACY_APP_PACKAGE_ID) {
-      key.package_id = FIXED_APP_PACKAGE_ID;
-      keysChanged = true;
-    }
-    if (Array.isArray(key.app_sessions)) {
-      for (const session of key.app_sessions) {
-        if (session.package_id === LEGACY_APP_PACKAGE_ID) {
-          session.package_id = FIXED_APP_PACKAGE_ID;
-          keysChanged = true;
-        }
-      }
-    }
-  }
-  if (keysChanged && !await saveKeys(keys)) {
-    throw new Error(`Unable to migrate keys to the ${FIXED_APP_PACKAGE_ID} package`);
-  }
-}
-
 function savePackages(packages) {
   return safeSaveJSON(PACKAGES_FILE, packages);
 }
@@ -1672,13 +1619,6 @@ app.patch('/api/admin/packages/:packageId', async (req, res) => {
     if (name !== undefined && (typeof name !== 'string' || !name.trim() || name.trim().length > 80)) {
       return res.status(400).json({ success: false, message: 'Name must be 1–80 characters' });
     }
-    if (appPackage.id === FIXED_APP_PACKAGE_ID &&
-        name !== undefined && name.trim() !== FIXED_APP_PACKAGE_ID) {
-      return res.status(400).json({
-        success: false,
-        message: `The ${FIXED_APP_PACKAGE_ID} package name is fixed`
-      });
-    }
 
     const previousMessage = appPackage.message || '';
     if (enabled !== undefined) appPackage.enabled = enabled;
@@ -1799,12 +1739,6 @@ app.get('/api/admin/notifications', async (req, res) => {
 app.delete('/api/admin/packages/:packageId', async (req, res) => {
   try {
     const packageId = req.params.packageId;
-    if (packageId === FIXED_APP_PACKAGE_ID) {
-      return res.status(409).json({
-        success: false,
-        message: `The ${FIXED_APP_PACKAGE_ID} package is fixed and cannot be deleted.`
-      });
-    }
     const packages = await loadPackages();
     const index = packages.findIndex(item => item.id === packageId);
     if (index === -1) return res.status(404).json({ success: false, message: 'Không tìm thấy gói.' });
@@ -2305,8 +2239,8 @@ app.post('/api/verify-key', async (req, res) => {
     const entrypoint = ['home', 'onboarding'].includes(req.body?.entrypoint)
       ? req.body.entrypoint
       : null;
-    const verificationSource = packageId === FIXED_APP_PACKAGE_ID && entrypoint
-      ? { source: FIXED_APP_PACKAGE_ID, packageId, entrypoint, verifiedAt: found.last_verified }
+    const verificationSource = packageId === 'PatchPro' && entrypoint
+      ? { source: 'PatchPro', packageId, entrypoint, verifiedAt: found.last_verified }
       : null;
     const registeredDevice = udidRouter.linkDeviceToKey(
       device_id,
@@ -2344,7 +2278,7 @@ app.post('/api/verify-device-code', async (req, res) => {
     const packageId = typeof req.body?.packageId === 'string' ? req.body.packageId.trim() : '';
     const entrypoint = typeof req.body?.entrypoint === 'string' ? req.body.entrypoint.trim() : '';
 
-    if (!/^[A-F0-9]{4}(?:-[A-F0-9]{4}){3}$/.test(deviceCode) || packageId !== FIXED_APP_PACKAGE_ID) {
+    if (!/^[A-F0-9]{4}(?:-[A-F0-9]{4}){3}$/.test(deviceCode) || packageId !== 'PatchPro') {
       return res.status(400).json({ success: false, message: 'Device code or PatchPro package is invalid.' });
     }
 
