@@ -10,8 +10,8 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 
-const FIXED_APP_PACKAGE_ID = 'HoangXuanTu';
-const LEGACY_APP_PACKAGE_ID = 'PatchPro';
+const FIXED_APP_PACKAGE_ID = 'PatchPro';
+const LEGACY_APP_PACKAGE_ID = 'HoangXuanTu';
 const app = express();
 app.set('trust proxy', 1); // Render đứng sau proxy: để req.protocol/req.ip đúng
 const udidRoutes = require('./udid-routes');
@@ -2345,7 +2345,7 @@ app.post('/api/verify-device-code', async (req, res) => {
     const entrypoint = typeof req.body?.entrypoint === 'string' ? req.body.entrypoint.trim() : '';
 
     if (!/^[A-F0-9]{4}(?:-[A-F0-9]{4}){3}$/.test(deviceCode) || packageId !== FIXED_APP_PACKAGE_ID) {
-      return res.status(400).json({ success: false, message: 'Device code or HoangXuanTu package is invalid.' });
+      return res.status(400).json({ success: false, message: 'Device code or PatchPro package is invalid.' });
     }
 
     const device = udidRouter.getDeviceRecords().find(record => record.deviceCode === deviceCode);
@@ -2356,12 +2356,12 @@ app.post('/api/verify-device-code', async (req, res) => {
     const keys = await loadKeys();
     const key = keys.find(record => record.key_code === device.linkedKey);
     if (!key || isKeyDisabled(key) || isKeyExpired(key) || key.package_id !== packageId) {
-      return res.status(403).json({ success: false, message: 'Linked key is disabled, expired, or not assigned to HoangXuanTu.' });
+      return res.status(403).json({ success: false, message: 'Linked key is disabled, expired, or not assigned to PatchPro.' });
     }
 
     const appPackage = (await loadPackages()).find(record => record.id === packageId && record.enabled);
     if (!appPackage) {
-      return res.status(403).json({ success: false, message: 'HoangXuanTu package is disabled.' });
+      return res.status(403).json({ success: false, message: 'PatchPro package is disabled.' });
     }
 
     const keyDevices = Array.isArray(key.devices) ? key.devices : [];

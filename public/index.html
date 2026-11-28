@@ -1019,7 +1019,7 @@ const packageColumns = [
   ['actions', '']
 ];
 const packageRecords = new Map();
-const FIXED_APP_PACKAGE_ID = 'HoangXuanTu';
+const FIXED_APP_PACKAGE_ID = 'PatchPro';
 let editingPackageId = null;
 const visiblePackageColumns = new Set(packageColumns.map(([id]) => id));
 
@@ -2326,7 +2326,7 @@ async function loadDeviceCodes() {
               ? new Date(entry.verifiedAt).toLocaleString('vi-VN')
               : '—';
             const usedCode = entry.deviceCode ? `<small>Mã thiết bị: ${escapeHtml(entry.deviceCode)}</small>` : '';
-            return `<div class="history-entry"><strong>${escapeHtml(entry.key || '—')}</strong><span>${escapeHtml(entry.source || 'HoangXuanTu')} · ${place}</span><small>${escapeHtml(date)}</small>${usedCode}</div>`;
+            return `<div class="history-entry"><strong>${escapeHtml(entry.key || '—')}</strong><span>${escapeHtml(entry.source || 'PatchPro')} · ${place}</span><small>${escapeHtml(date)}</small>${usedCode}</div>`;
           }).join('');
           return `<details class="history-details"><summary><strong>${keyEntries.length} lượt</strong><small>Mới nhất: ${escapeHtml(latestDate)}</small></summary><div class="history-list">${entries}</div></details>`;
         })()
@@ -2335,7 +2335,7 @@ async function loadDeviceCodes() {
         <td data-label="Mã riêng" class="mono-cell">${code ? `<span class="tag linked">${escapeHtml(code)}</span>` : '<span class="tag unlinked">chưa cấp mã</span>'}</td>
         <td data-label="UDID" class="mono-cell">${escapeHtml(device.udid || '—')}</td>
         <td data-label="Key liên kết">${device.linkedKey ? `<span class="tag linked">${escapeHtml(device.linkedKey)}</span>` : `<span class="tag unlinked">chưa liên kết</span>`}</td>
-        <td data-label="L&#x1ECB;ch s&#x1EED; nh&#x1EAD;p t&#x1EEB; HoangXuanTu">${keyEntryHistory}</td>
+        <td data-label="L&#x1ECB;ch s&#x1EED; nh&#x1EAD;p t&#x1EEB; PatchPro">${keyEntryHistory}</td>
         <td data-label="Model">${escapeHtml(device.product || '—')}</td>
         <td data-label="iOS">${escapeHtml(device.version || '—')}</td>
         <td data-label="Thời gian cấp mã">${issuedAt ? new Date(issuedAt).toLocaleString('vi-VN') : '—'}</td>
